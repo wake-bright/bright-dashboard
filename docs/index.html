@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ブライト Webダッシュボード</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<style>
+  body { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', sans-serif; }
+  .tab-btn { transition: all .15s; border-bottom: 3px solid transparent; }
+  .tab-btn.active { border-bottom: 3px solid #4f46e5; color: #4f46e5; font-weight: 700; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  .kpi-card { transition: transform .15s; }
+  .kpi-card:hover { transform: translateY(-2px); }
+  .filter-btn { transition: all .12s; }
+  .filter-btn.active { background: #4f46e5; color: white; }
+  .filter-btn.active-komon { background: #10b981; color: white; }
+  .filter-btn.active-rosai { background: #ef4444; color: white; }
+  .filter-btn.active-kotsu { background: #f59e0b; color: white; }
+  .filter-btn.active-other { background: #64748b; color: white; }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- ヘッダー -->
+<header class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
+        <span class="text-white text-xs font-bold">B</span>
+      </div>
+      <div>
+        <div class="font-bold text-gray-900 text-sm">弁護士法人ブライト</div>
+        <div class="text-xs text-gray-500">Webマーケ ダッシュボード</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3 flex-wrap">
+      <a href="https://law-bright.com" target="_blank" class="text-xs text-indigo-600 hover:underline">law-bright.com ↗</a>
+      <a href="https://law-bright.com/wp-admin/" target="_blank" class="text-xs text-indigo-600 hover:underline">WP管理 ↗</a>
+      <span class="text-xs text-gray-400">更新: 2026-05-16 09:34 JST</span>
+    </div>
+  </div>
+</header>
+
+<!-- ジャンルフィルター（グローバル） -->
+<div class="bg-white border-b border-gray-100 sticky top-[57px] z-40">
+  <div class="max-w-7xl mx-auto px-4 py-2 flex items-center gap-2 flex-wrap">
+    <span class="text-xs text-gray-500 mr-1">ジャンル：</span>
+    <button class="filter-btn active px-3 py-1 rounded-full text-xs font-semibold border border-gray-300" onclick="setFilter('all', this)">全体</button>
+    <button class="filter-btn px-3 py-1 rounded-full text-xs font-semibold border border-emerald-300 text-emerald-700" onclick="setFilter('komon', this)">🏢 企業法務</button>
+    <button class="filter-btn px-3 py-1 rounded-full text-xs font-semibold border border-red-300 text-red-700" onclick="setFilter('rosai', this)">⚠️ 労災</button>
+    <button class="filter-btn px-3 py-1 rounded-full text-xs font-semibold border border-amber-300 text-amber-700" onclick="setFilter('kotsu', this)">🚗 交通事故</button>
+    <button class="filter-btn px-3 py-1 rounded-full text-xs font-semibold border border-slate-300 text-slate-600" onclick="setFilter('other', this)">📋 その他</button>
+  </div>
+</div>
+
+<div class="max-w-7xl mx-auto px-4 py-5">
+
+  <!-- KPIカード -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+    <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+      <div class="text-xs text-gray-500 mb-1">セッション（30日）</div>
+      <div class="text-2xl font-bold text-gray-900">21,907</div>
+      <div class="text-xs text-indigo-600 mt-1">GA4 · law-bright.com</div>
+    </div>
+    <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+      <div class="text-xs text-gray-500 mb-1">クリック（28日）</div>
+      <div class="text-2xl font-bold text-gray-900">8,042</div>
+      <div class="text-xs text-indigo-600 mt-1">GSC · 平均順位 8.5位</div>
+    </div>
+    <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+      <div class="text-xs text-gray-500 mb-1">インプレッション（28日）</div>
+      <div class="text-2xl font-bold text-gray-900">727,358</div>
+      <div class="text-xs text-indigo-600 mt-1">GSC · CTR 1.11%</div>
+    </div>
+    <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+      <div class="text-xs text-gray-500 mb-1">総記事数（WP）</div>
+      <div class="text-2xl font-bold text-gray-900">768</div>
+      <div class="text-xs text-yellow-600 mt-1">draft 97本 残</div>
+    </div>
+  </div>
+
+  <!-- ジャンル別サマリー行 -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5" id="cat-summary">
+    <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 cat-summary-card" data-cat="komon">
+      <div class="text-xs text-emerald-600 font-semibold mb-1">🏢 企業法務</div>
+      <div class="text-xl font-bold text-emerald-800">203<span class="text-sm font-normal text-emerald-600 ml-1">本</span></div>
+    </div>
+    <div class="bg-red-50 border border-red-200 rounded-xl p-3 cat-summary-card" data-cat="rosai">
+      <div class="text-xs text-red-600 font-semibold mb-1">⚠️ 労災</div>
+      <div class="text-xl font-bold text-red-800">0<span class="text-sm font-normal text-red-600 ml-1">本</span></div>
+    </div>
+    <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 cat-summary-card" data-cat="kotsu">
+      <div class="text-xs text-amber-600 font-semibold mb-1">🚗 交通事故</div>
+      <div class="text-xl font-bold text-amber-800">261<span class="text-sm font-normal text-amber-600 ml-1">本</span></div>
+    </div>
+    <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 cat-summary-card" data-cat="other">
+      <div class="text-xs text-slate-600 font-semibold mb-1">📋 その他</div>
+      <div class="text-xl font-bold text-slate-800">304<span class="text-sm font-normal text-slate-600 ml-1">本</span></div>
+    </div>
+  </div>
+
+  <!-- タブ -->
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+    <div class="border-b border-gray-200 flex overflow-x-auto">
+      <button class="tab-btn active px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('kpi')">📊 KPI</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('articles')">📝 記事ステータス</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('pages')">🏆 上位ページ</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('tasks')">✅ タスク</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('info')">ℹ️ 基本情報</button>
+    </div>
+
+    <!-- KPIタブ -->
+    <div id="tab-kpi" class="tab-content active p-5">
+      <div class="grid md:grid-cols-2 gap-6">
+        <div><div class="text-sm font-semibold text-gray-700 mb-3">セッション推移（直近30日）</div><canvas id="chartSessions" height="200"></canvas></div>
+        <div><div class="text-sm font-semibold text-gray-700 mb-3">コンバージョン推移（直近30日）</div><canvas id="chartConv" height="200"></canvas></div>
+        <div><div class="text-sm font-semibold text-gray-700 mb-3">GSCクリック推移（直近28日）</div><canvas id="chartClicks" height="200"></canvas></div>
+        <div>
+          <div class="text-sm font-semibold text-gray-700 mb-3">ジャンル別 公開記事数</div>
+          <canvas id="chartCpt" height="200"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- 記事ステータスタブ -->
+    <div id="tab-articles" class="tab-content">
+      <div class="p-4">
+        <div id="articles-empty" class="hidden text-center text-gray-400 py-8 text-sm">該当なし</div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                <th class="px-4 py-3 text-left">カテゴリ</th>
+                <th class="px-4 py-3 text-left">ジャンル</th>
+                <th class="px-4 py-3 text-center">公開</th>
+                <th class="px-4 py-3 text-center">下書き</th>
+                <th class="px-4 py-3 text-left">進捗</th>
+                <th class="px-4 py-3 text-center">公開率</th>
+              </tr>
+            </thead>
+            <tbody id="cpt-tbody" class="divide-y divide-gray-100">
+        <tr class="hover:bg-gray-50 transition-colors cpt-row" data-cat="kotsu">
+          <td class="px-4 py-3 font-medium text-gray-800">交通事故</td>
+          <td class="px-4 py-3"><span class="inline-block bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-1 rounded-full">交通事故</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">261</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">1</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:100%;background:#f59e0b"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">100%</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors cpt-row" data-cat="komon">
+          <td class="px-4 py-3 font-medium text-gray-800">顧問弁護士</td>
+          <td class="px-4 py-3"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">170</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">22</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:89%;background:#10b981"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">89%</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors cpt-row" data-cat="other">
+          <td class="px-4 py-3 font-medium text-gray-800">固定ページ</td>
+          <td class="px-4 py-3"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">111</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">12</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:90%;background:#6366f1"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">90%</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors cpt-row" data-cat="other">
+          <td class="px-4 py-3 font-medium text-gray-800">法律用語集</td>
+          <td class="px-4 py-3"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">108</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">35</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:76%;background:#3b82f6"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">76%</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors cpt-row" data-cat="other">
+          <td class="px-4 py-3 font-medium text-gray-800">相続</td>
+          <td class="px-4 py-3"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">50</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">0</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:100%;background:#fb7185"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">100%</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors cpt-row" data-cat="other">
+          <td class="px-4 py-3 font-medium text-gray-800">資料DL</td>
+          <td class="px-4 py-3"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">23</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">0</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:100%;background:#14b8a6"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">100%</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors cpt-row" data-cat="komon">
+          <td class="px-4 py-3 font-medium text-gray-800">問題社員</td>
+          <td class="px-4 py-3"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">19</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">1</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:95%;background:#ec4899"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">95%</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors cpt-row" data-cat="komon">
+          <td class="px-4 py-3 font-medium text-gray-800">M&A</td>
+          <td class="px-4 py-3"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">13</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">26</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:33%;background:#fbbf24"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">33%</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors cpt-row" data-cat="other">
+          <td class="px-4 py-3 font-medium text-gray-800">ブログ記事</td>
+          <td class="px-4 py-3"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">12</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">0</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:100%;background:#8b5cf6"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">100%</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors cpt-row" data-cat="komon">
+          <td class="px-4 py-3 font-medium text-gray-800">不動産</td>
+          <td class="px-4 py-3"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">1</span></td>
+          <td class="px-4 py-3 text-center"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">0</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:100%;background:#a78bfa"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">100%</td>
+        </tr></tbody>
+            <tfoot>
+              <tr class="bg-indigo-50 font-bold">
+                <td class="px-4 py-3 text-indigo-800" colspan="2">合計</td>
+                <td class="px-4 py-3 text-center text-green-700" id="total-pub">768</td>
+                <td class="px-4 py-3 text-center text-yellow-700" id="total-draft">97</td>
+                <td class="px-4 py-3"></td>
+                <td class="px-4 py-3 text-center text-indigo-700">89%</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 上位ページタブ -->
+    <div id="tab-pages" class="tab-content">
+      <div class="p-4">
+        <div class="text-xs text-gray-500 mb-3">直近28日 · Google Search Console · クリック数降順</div>
+        <div id="pages-empty" class="hidden text-center text-gray-400 py-8 text-sm">該当なし</div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                <th class="px-3 py-2 text-center">#</th>
+                <th class="px-3 py-2 text-left">URL</th>
+                <th class="px-3 py-2 text-left">ジャンル</th>
+                <th class="px-3 py-2 text-center">クリック</th>
+                <th class="px-3 py-2 text-center">表示回数</th>
+                <th class="px-3 py-2 text-center">CTR</th>
+                <th class="px-3 py-2 text-center">順位</th>
+              </tr>
+            </thead>
+            <tbody id="pages-tbody" class="divide-y divide-gray-100">
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#1</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/form8/" target="_blank" class="hover:underline">/labor-accident/knowledge/form8/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">634</td>
+          <td class="px-3 py-2 text-center text-gray-500">41,391</td>
+          <td class="px-3 py-2 text-center text-green-700">1.53%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">6.5</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#2</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/form5/" target="_blank" class="hover:underline">/labor-accident/knowledge/form5/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">545</td>
+          <td class="px-3 py-2 text-center text-gray-500">62,107</td>
+          <td class="px-3 py-2 text-center text-red-600">0.88%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">6.6</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#3</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/tenosynovitis-workers-comp/" target="_blank" class="hover:underline">/labor-accident/knowledge/tenosynovitis-workers-comp/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">387</td>
+          <td class="px-3 py-2 text-center text-gray-500">8,412</td>
+          <td class="px-3 py-2 text-center text-green-700">4.6%</td>
+          <td class="px-3 py-2 text-center text-green-700 font-bold">4.6</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#4</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/workers-comp-notice-delay/" target="_blank" class="hover:underline">/labor-accident/knowledge/workers-comp-notice-delay/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">376</td>
+          <td class="px-3 py-2 text-center text-gray-500">17,735</td>
+          <td class="px-3 py-2 text-center text-green-700">2.12%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">5.8</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="other">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#5</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/" target="_blank" class="hover:underline">/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-3 py-2 text-center font-semibold">289</td>
+          <td class="px-3 py-2 text-center text-gray-500">1,351</td>
+          <td class="px-3 py-2 text-center text-green-700">21.39%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">7.2</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#6</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/workers-compensation-payment-delay/" target="_blank" class="hover:underline">/labor-accident/knowledge/workers-compensation-payment-delay/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">282</td>
+          <td class="px-3 py-2 text-center text-gray-500">18,743</td>
+          <td class="px-3 py-2 text-center text-yellow-700">1.5%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">6.1</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#7</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/third-party-act-accident/" target="_blank" class="hover:underline">/labor-accident/knowledge/third-party-act-accident/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">171</td>
+          <td class="px-3 py-2 text-center text-gray-500">17,573</td>
+          <td class="px-3 py-2 text-center text-red-600">0.97%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">7.9</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#8</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/workers-compensation-bonus/" target="_blank" class="hover:underline">/labor-accident/knowledge/workers-compensation-bonus/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">168</td>
+          <td class="px-3 py-2 text-center text-gray-500">4,464</td>
+          <td class="px-3 py-2 text-center text-green-700">3.76%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">6.7</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#9</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/industrial-accident-application-medical-certificate/" target="_blank" class="hover:underline">/labor-accident/knowledge/industrial-accident-application-medical-certificate/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">166</td>
+          <td class="px-3 py-2 text-center text-gray-500">15,880</td>
+          <td class="px-3 py-2 text-center text-yellow-700">1.05%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">7.2</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#10</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/jigyousyusyoumei/" target="_blank" class="hover:underline">/labor-accident/knowledge/jigyousyusyoumei/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">160</td>
+          <td class="px-3 py-2 text-center text-gray-500">9,931</td>
+          <td class="px-3 py-2 text-center text-green-700">1.61%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">8.5</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#11</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/workers-compensation-leave/" target="_blank" class="hover:underline">/labor-accident/knowledge/workers-compensation-leave/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">152</td>
+          <td class="px-3 py-2 text-center text-gray-500">8,748</td>
+          <td class="px-3 py-2 text-center text-green-700">1.74%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">6.8</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="komon">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#12</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/corporationlaw/contents/company/foreigner-accommodation-residence-card/" target="_blank" class="hover:underline">/corporationlaw/contents/company/foreigner-accommodation-residence-card/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-3 py-2 text-center font-semibold">140</td>
+          <td class="px-3 py-2 text-center text-gray-500">3,253</td>
+          <td class="px-3 py-2 text-center text-green-700">4.3%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">6.2</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="komon">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#13</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/corporationlaw/contents/syohisya/hotel-refund-handling/" target="_blank" class="hover:underline">/corporationlaw/contents/syohisya/hotel-refund-handling/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-3 py-2 text-center font-semibold">132</td>
+          <td class="px-3 py-2 text-center text-gray-500">2,309</td>
+          <td class="px-3 py-2 text-center text-green-700">5.72%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">6.8</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="komon">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#14</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/corporationlaw/contents/company/foreigner-hotel-passport/" target="_blank" class="hover:underline">/corporationlaw/contents/company/foreigner-hotel-passport/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-3 py-2 text-center font-semibold">124</td>
+          <td class="px-3 py-2 text-center text-gray-500">3,517</td>
+          <td class="px-3 py-2 text-center text-green-700">3.53%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">6.2</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#15</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/commute-deviation-accident/" target="_blank" class="hover:underline">/labor-accident/knowledge/commute-deviation-accident/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">115</td>
+          <td class="px-3 py-2 text-center text-gray-500">7,122</td>
+          <td class="px-3 py-2 text-center text-green-700">1.61%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">9.5</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="other">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#16</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/glossary/jc/jc_a/benefit-of-the-doubt/" target="_blank" class="hover:underline">/glossary/jc/jc_a/benefit-of-the-doubt/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-3 py-2 text-center font-semibold">109</td>
+          <td class="px-3 py-2 text-center text-gray-500">14,985</td>
+          <td class="px-3 py-2 text-center text-red-600">0.73%</td>
+          <td class="px-3 py-2 text-center text-green-700 font-bold">3.4</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="kotsu">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#17</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/kotuziko/knowledge/nakineiri/" target="_blank" class="hover:underline">/kotuziko/knowledge/nakineiri/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-1 rounded-full">交通事故</span></td>
+          <td class="px-3 py-2 text-center font-semibold">102</td>
+          <td class="px-3 py-2 text-center text-gray-500">5,756</td>
+          <td class="px-3 py-2 text-center text-green-700">1.77%</td>
+          <td class="px-3 py-2 text-center text-red-600">11.5</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="rosai">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#18</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/labor-accident/knowledge/workers-comp-retaliation/" target="_blank" class="hover:underline">/labor-accident/knowledge/workers-comp-retaliation/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-3 py-2 text-center font-semibold">94</td>
+          <td class="px-3 py-2 text-center text-gray-500">2,881</td>
+          <td class="px-3 py-2 text-center text-green-700">3.26%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">5.4</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="kotsu">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#19</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/kotuziko/knowledge/kotsujiko_kizu/" target="_blank" class="hover:underline">/kotuziko/knowledge/kotsujiko_kizu/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-1 rounded-full">交通事故</span></td>
+          <td class="px-3 py-2 text-center font-semibold">91</td>
+          <td class="px-3 py-2 text-center text-gray-500">4,008</td>
+          <td class="px-3 py-2 text-center text-green-700">2.27%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">8.1</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="komon">
+          <td class="px-3 py-2 text-center text-gray-400 text-sm">#20</td>
+          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="https://law-bright.com/corporationlaw/contents/saiken/hotel-cancellation-fee-unpaid/" target="_blank" class="hover:underline">/corporationlaw/contents/saiken/hotel-cancellation-fee-unpaid/</a></td>
+          <td class="px-3 py-2"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-3 py-2 text-center font-semibold">82</td>
+          <td class="px-3 py-2 text-center text-gray-500">6,025</td>
+          <td class="px-3 py-2 text-center text-yellow-700">1.36%</td>
+          <td class="px-3 py-2 text-center text-yellow-700">7.9</td>
+        </tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- タスクタブ -->
+    <div id="tab-tasks" class="tab-content">
+      <div class="p-4">
+        <div class="text-xs text-gray-500 mb-3">進行中タスク（2026-05-16時点）</div>
+        <div id="tasks-empty" class="hidden text-center text-gray-400 py-8 text-sm">該当なし</div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                <th class="px-4 py-3 text-left">案件名</th>
+                <th class="px-4 py-3 text-left">ジャンル</th>
+                <th class="px-4 py-3 text-center">状況</th>
+                <th class="px-4 py-3 text-left">詳細</th>
+              </tr>
+            </thead>
+            <tbody id="tasks-tbody" class="divide-y divide-gray-100">
+        <tr class="hover:bg-gray-50 transition-colors task-row" data-cat="kotsu">
+          <td class="px-4 py-3 font-medium text-gray-800">交通事故SEO 200本量産</td>
+          <td class="px-4 py-3"><span class="inline-block bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-1 rounded-full">交通事故</span></td>
+          <td class="px-4 py-3"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">進行中</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600">publish 79本／draft残34本</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors task-row" data-cat="rosai">
+          <td class="px-4 py-3 font-medium text-gray-800">アイキャッチ差し替え（労災）</td>
+          <td class="px-4 py-3"><span class="inline-block bg-red-100 text-red-700 text-xs font-semibold px-2 py-1 rounded-full">労災</span></td>
+          <td class="px-4 py-3"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">進行中</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600">このチャット系列で進行中</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors task-row" data-cat="other">
+          <td class="px-4 py-3 font-medium text-gray-800">GBP API 申請</td>
+          <td class="px-4 py-3"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-4 py-3"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">完了</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600">✅ 承認完了（2026-05-14）API稼働確認済</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors task-row" data-cat="other">
+          <td class="px-4 py-3 font-medium text-gray-800">AppSheet REST API（Bot連携）</td>
+          <td class="px-4 py-3"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-4 py-3"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">完了</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600">✅ 送付状Modalで本番稼働中（rev 00057-pzl）</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors task-row" data-cat="other">
+          <td class="px-4 py-3 font-medium text-gray-800">マーケ連結レポート</td>
+          <td class="px-4 py-3"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-4 py-3"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">完了</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600">✅ marketing_attribution.py 月次cron稼働中</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors task-row" data-cat="other">
+          <td class="px-4 py-3 font-medium text-gray-800">マーケ連結 Phase 2</td>
+          <td class="px-4 py-3"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-4 py-3"><span class="inline-block bg-gray-100 text-gray-600 text-xs font-semibold px-2 py-1 rounded-full">未着手</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600">CF7 hidden 8項目→AppSheet 流し込みが前提</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors task-row" data-cat="komon">
+          <td class="px-4 py-3 font-medium text-gray-800">Amazon対策LP・広告</td>
+          <td class="px-4 py-3"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-4 py-3"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">進行中</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600">月予算20万・高LTVセラー特化／API申請中</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors task-row" data-cat="komon">
+          <td class="px-4 py-3 font-medium text-gray-800">23条照会自動化</td>
+          <td class="px-4 py-3"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-4 py-3"><span class="inline-block bg-gray-100 text-gray-600 text-xs font-semibold px-2 py-1 rounded-full">未着手</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600">設計完了・Phase 1実装待ち</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors task-row" data-cat="other">
+          <td class="px-4 py-3 font-medium text-gray-800">NTA法人番号API（DM営業）</td>
+          <td class="px-4 py-3"><span class="inline-block bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">その他</span></td>
+          <td class="px-4 py-3"><span class="inline-block bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded-full">待機中</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600">承認見込 2026-06-03（リマインダー設定済）</td>
+        </tr>
+        <tr class="hover:bg-gray-50 transition-colors task-row" data-cat="komon">
+          <td class="px-4 py-3 font-medium text-gray-800">PMI/DD v2 リライト残12本</td>
+          <td class="px-4 py-3"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-4 py-3"><span class="inline-block bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded-full">待機中</span></td>
+          <td class="px-4 py-3 text-sm text-gray-600">30日後評価ジョブ at#3（2026-06-02 実行）</td>
+        </tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 基本情報タブ -->
+    <div id="tab-info" class="tab-content">
+      <div class="p-5 grid md:grid-cols-2 gap-6">
+        <div>
+          <div class="text-sm font-semibold text-gray-700 mb-3">在籍弁護士（2026-05-16時点）</div>
+          <div id="lawyers-list" class="space-y-2">
+        <div class="lawyer-card flex items-center gap-3 p-3 bg-gray-50 rounded-lg border-l-4 border-slate-200" data-cat="other">
+          <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm flex-shrink-0">和</div>
+          <div>
+            <div class="font-semibold text-gray-800 text-sm">和氣 良浩</div>
+            <div class="text-xs text-gray-500">代表弁護士 · 全般</div>
+          </div>
+        </div>
+        <div class="lawyer-card flex items-center gap-3 p-3 bg-gray-50 rounded-lg border-l-4 border-slate-200" data-cat="other">
+          <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm flex-shrink-0">山</div>
+          <div>
+            <div class="font-semibold text-gray-800 text-sm">山中 先生</div>
+            <div class="text-xs text-gray-500">弁護士 · 全般</div>
+          </div>
+        </div>
+        <div class="lawyer-card flex items-center gap-3 p-3 bg-gray-50 rounded-lg border-l-4 border-emerald-300" data-cat="komon">
+          <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm flex-shrink-0">嶋</div>
+          <div>
+            <div class="font-semibold text-gray-800 text-sm">嶋本 先生</div>
+            <div class="text-xs text-gray-500">弁護士 · 企業法務</div>
+          </div>
+        </div>
+        <div class="lawyer-card flex items-center gap-3 p-3 bg-gray-50 rounded-lg border-l-4 border-slate-200" data-cat="other">
+          <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm flex-shrink-0">有</div>
+          <div>
+            <div class="font-semibold text-gray-800 text-sm">有本 先生</div>
+            <div class="text-xs text-gray-500">弁護士 · 全般</div>
+          </div>
+        </div>
+        <div class="lawyer-card flex items-center gap-3 p-3 bg-gray-50 rounded-lg border-l-4 border-amber-300" data-cat="kotsu">
+          <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm flex-shrink-0">松</div>
+          <div>
+            <div class="font-semibold text-gray-800 text-sm">松本 洋明</div>
+            <div class="text-xs text-gray-500">弁護士（交通事故主任） · 交通事故</div>
+          </div>
+        </div>
+        <div class="lawyer-card flex items-center gap-3 p-3 bg-gray-50 rounded-lg border-l-4 border-slate-200" data-cat="other">
+          <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm flex-shrink-0">福</div>
+          <div>
+            <div class="font-semibold text-gray-800 text-sm">福本 先生</div>
+            <div class="text-xs text-gray-500">弁護士 · 全般</div>
+          </div>
+        </div>
+        <div class="lawyer-card flex items-center gap-3 p-3 bg-gray-50 rounded-lg border-l-4 border-red-300" data-cat="rosai">
+          <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm flex-shrink-0">笹</div>
+          <div>
+            <div class="font-semibold text-gray-800 text-sm">笹野 皓平</div>
+            <div class="text-xs text-gray-500">弁護士（労災部部長） · 労災</div>
+          </div>
+        </div></div>
+        </div>
+        <div>
+          <div class="text-sm font-semibold text-gray-700 mb-3">主要システムリンク</div>
+          <div class="space-y-2 text-sm">
+            <a href="https://law-bright.com/wp-admin/" target="_blank" class="flex items-center gap-2 p-3 bg-gray-50 rounded-lg hover:bg-indigo-50 transition-colors"><span class="text-indigo-600 font-mono text-xs w-8">WP</span><span class="text-gray-700">WordPress管理画面</span><span class="ml-auto text-gray-400">↗</span></a>
+            <a href="https://analytics.google.com/analytics/web/#/p316908797/" target="_blank" class="flex items-center gap-2 p-3 bg-gray-50 rounded-lg hover:bg-indigo-50 transition-colors"><span class="text-orange-600 font-mono text-xs w-8">GA4</span><span class="text-gray-700">Google Analytics</span><span class="ml-auto text-gray-400">↗</span></a>
+            <a href="https://search.google.com/search-console/performance/search-analytics?resource_id=https%3A%2F%2Flaw-bright.com%2F" target="_blank" class="flex items-center gap-2 p-3 bg-gray-50 rounded-lg hover:bg-indigo-50 transition-colors"><span class="text-green-600 font-mono text-xs w-8">GSC</span><span class="text-gray-700">Google Search Console</span><span class="ml-auto text-gray-400">↗</span></a>
+            <a href="https://docs.google.com/spreadsheets/d/1Fm52M1BJVTOPD97TQyo7UsSfwGp9pNBQN7RdXZENQyI/" target="_blank" class="flex items-center gap-2 p-3 bg-gray-50 rounded-lg hover:bg-indigo-50 transition-colors"><span class="text-green-600 font-mono text-xs w-8">GS</span><span class="text-gray-700">SEOレポートシート</span><span class="ml-auto text-gray-400">↗</span></a>
+            <a href="https://bright.3cx.asia:5001/#/recordings" target="_blank" class="flex items-center gap-2 p-3 bg-gray-50 rounded-lg hover:bg-indigo-50 transition-colors"><span class="text-purple-600 font-mono text-xs w-8">3CX</span><span class="text-gray-700">通話録音・ログ</span><span class="ml-auto text-gray-400">↗</span></a>
+          </div>
+          <div class="text-sm font-semibold text-gray-700 mt-5 mb-3">ジャンル別フリーダイヤル</div>
+          <div class="space-y-1 text-xs">
+            <div class="flex justify-between p-2 bg-red-50 rounded"><span class="text-red-700 font-medium">⚠️ 労災</span><span class="text-gray-700 font-mono">0120-931-501</span></div>
+            <div class="flex justify-between p-2 bg-amber-50 rounded"><span class="text-amber-700 font-medium">🚗 交通事故</span><span class="text-gray-700 font-mono">0120-927-113</span></div>
+            <div class="flex justify-between p-2 bg-blue-50 rounded"><span class="text-blue-700 font-medium">🏢 倒産</span><span class="text-gray-700 font-mono">0120-927-577</span></div>
+            <div class="flex justify-between p-2 bg-green-50 rounded"><span class="text-green-700 font-medium">🏛️ みんなの法務部</span><span class="text-gray-700 font-mono">0120-929-739</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer class="text-center text-xs text-gray-400 py-6">弁護士法人ブライト 内部資料 · 外部公開禁止 · 更新: 2026-05-16 09:34 JST</footer>
+
+<script>
+const ga4Labels   = ["04/16", "04/17", "04/18", "04/19", "04/20", "04/21", "04/22", "04/23", "04/24", "04/25", "04/26", "04/27", "04/28", "04/29", "04/30", "05/01", "05/02", "05/03", "05/04", "05/05", "05/06", "05/07", "05/08", "05/09", "05/10", "05/11", "05/12", "05/13", "05/14", "05/15"];
+const ga4Sessions = [738, 744, 300, 259, 746, 848, 790, 787, 715, 345, 279, 943, 1026, 423, 1041, 989, 422, 335, 367, 356, 403, 1084, 1186, 456, 334, 1238, 1253, 1147, 1216, 1137];
+const ga4Conv     = [3, 6, 5, 1, 3, 8, 2, 4, 0, 3, 4, 6, 7, 5, 4, 23, 31, 4, 2, 1, 4, 16, 12, 1, 1, 11, 8, 5, 20, 5];
+const gscLabels   = ["04-18", "04-19", "04-20", "04-21", "04-22", "04-23", "04-24", "04-25", "04-26", "04-27", "04-28", "04-29", "04-30", "05-01", "05-02", "05-03", "05-04", "05-05", "05-06", "05-07", "05-08", "05-09", "05-10", "05-11", "05-12", "05-13", "05-14", "05-15"];
+const gscClicks   = [135, 262, 363, 331, 342, 344, 209, 168, 249, 370, 232, 270, 342, 227, 150, 160, 162, 179, 311, 447, 312, 164, 373, 476, 429, 440, 452, 143];
+const gscImps     = [23775, 33809, 35177, 30340, 29632, 30726, 20412, 16122, 25293, 29351, 20768, 25881, 29738, 20850, 15371, 15494, 15551, 17288, 28181, 34809, 24490, 19283, 30135, 36912, 35767, 35453, 33888, 12862];
+
+new Chart(document.getElementById('chartSessions'), {
+  type: 'line',
+  data: { labels: ga4Labels, datasets: [{ label: 'セッション', data: ga4Sessions, borderColor: '#6366f1', backgroundColor: '#6366f115', fill: true, tension: 0.3, pointRadius: 2 }] },
+  options: { responsive: true, plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } }, scales: { x: { ticks: { maxRotation: 45, font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } } }
+});
+new Chart(document.getElementById('chartConv'), {
+  type: 'bar',
+  data: { labels: ga4Labels, datasets: [{ label: 'CV', data: ga4Conv, backgroundColor: '#10b981aa' }] },
+  options: { responsive: true, plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } }, scales: { x: { ticks: { maxRotation: 45, font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } } }
+});
+new Chart(document.getElementById('chartClicks'), {
+  type: 'line',
+  data: { labels: gscLabels, datasets: [
+    { label: 'クリック', data: gscClicks, borderColor: '#f59e0b', backgroundColor: '#f59e0b15', fill: true, tension: 0.3, pointRadius: 2, yAxisID: 'y' },
+    { label: '表示（÷100）', data: gscImps.map(v=>Math.round(v/100)), borderColor: '#94a3b8', borderDash: [4,4], tension: 0.3, pointRadius: 0, yAxisID: 'y' }
+  ] },
+  options: { responsive: true, plugins: { legend: { display: true, labels: { font: { size: 10 } } }, tooltip: { mode: 'index', intersect: false } }, scales: { x: { ticks: { maxRotation: 45, font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } } }
+});
+new Chart(document.getElementById('chartCpt'), {
+  type: 'doughnut',
+  data: {
+    labels: ['🏢 企業法務', '⚠️ 労災', '🚗 交通事故', '📋 その他'],
+    datasets: [{ data: [203, 0, 261, 304], backgroundColor: ['#10b981','#ef4444','#f59e0b','#64748b'], borderWidth: 1 }]
+  },
+  options: { responsive: true, plugins: { legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 12 } } } }
+});
+
+// ── フィルター ──────────────────────────────────────
+let currentFilter = 'all';
+
+function setFilter(cat, btn) {
+  currentFilter = cat;
+  document.querySelectorAll('.filter-btn').forEach(b => {
+    b.classList.remove('active','active-komon','active-rosai','active-kotsu','active-other');
+  });
+  if (cat === 'all') btn.classList.add('active');
+  else btn.classList.add('active-' + cat);
+
+  applyFilter();
+}
+
+function applyFilter() {
+  const cat = currentFilter;
+
+  // 記事ステータス
+  let cptVisible = 0;
+  document.querySelectorAll('.cpt-row').forEach(row => {
+    const show = cat === 'all' || row.dataset.cat === cat;
+    row.style.display = show ? '' : 'none';
+    if (show) cptVisible++;
+  });
+  document.getElementById('articles-empty').classList.toggle('hidden', cptVisible > 0);
+
+  // 上位ページ
+  let pageVisible = 0;
+  document.querySelectorAll('.page-row').forEach(row => {
+    const show = cat === 'all' || row.dataset.cat === cat;
+    row.style.display = show ? '' : 'none';
+    if (show) pageVisible++;
+  });
+  document.getElementById('pages-empty').classList.toggle('hidden', pageVisible > 0);
+
+  // タスク
+  let taskVisible = 0;
+  document.querySelectorAll('.task-row').forEach(row => {
+    const show = cat === 'all' || row.dataset.cat === cat;
+    row.style.display = show ? '' : 'none';
+    if (show) taskVisible++;
+  });
+  document.getElementById('tasks-empty').classList.toggle('hidden', taskVisible > 0);
+
+  // 弁護士
+  document.querySelectorAll('.lawyer-card').forEach(card => {
+    card.style.display = (cat === 'all' || card.dataset.cat === cat) ? '' : 'none';
+  });
+
+  // サマリーカードのハイライト
+  document.querySelectorAll('.cat-summary-card').forEach(card => {
+    card.style.opacity = (cat === 'all' || card.dataset.cat === cat) ? '1' : '0.35';
+  });
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.currentTarget.classList.add('active');
+}
+</script>
+</body>
+</html>
