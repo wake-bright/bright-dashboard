@@ -39,7 +39,7 @@
     <div class="flex items-center gap-3 flex-wrap">
       <a href="https://law-bright.com" target="_blank" class="text-xs text-indigo-600 hover:underline">law-bright.com ↗</a>
       <a href="https://law-bright.com/wp-admin/" target="_blank" class="text-xs text-indigo-600 hover:underline">WP管理 ↗</a>
-      <span class="text-xs text-gray-400">更新: 2026-05-16 09:34 JST</span>
+      <span class="text-xs text-gray-400">更新: 2026-05-16 09:58 JST</span>
     </div>
   </div>
 </header>
@@ -61,24 +61,24 @@
   <!-- KPIカード -->
   <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
-      <div class="text-xs text-gray-500 mb-1">セッション（30日）</div>
-      <div class="text-2xl font-bold text-gray-900">21,907</div>
-      <div class="text-xs text-indigo-600 mt-1">GA4 · law-bright.com</div>
+      <div class="text-xs text-gray-500 mb-1" id="kpi-sessions-label">セッション（30日）</div>
+      <div class="text-2xl font-bold text-gray-900" id="kpi-sessions">21,907</div>
+      <div class="text-xs text-indigo-600 mt-1" id="kpi-sessions-sub">GA4 · 全ジャンル計</div>
     </div>
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
       <div class="text-xs text-gray-500 mb-1">クリック（28日）</div>
-      <div class="text-2xl font-bold text-gray-900">8,042</div>
-      <div class="text-xs text-indigo-600 mt-1">GSC · 平均順位 8.5位</div>
+      <div class="text-2xl font-bold text-gray-900" id="kpi-clicks">8,042</div>
+      <div class="text-xs text-indigo-600 mt-1" id="kpi-clicks-sub">GSC · 平均順位 8.5位</div>
     </div>
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
       <div class="text-xs text-gray-500 mb-1">インプレッション（28日）</div>
-      <div class="text-2xl font-bold text-gray-900">727,358</div>
-      <div class="text-xs text-indigo-600 mt-1">GSC · CTR 1.11%</div>
+      <div class="text-2xl font-bold text-gray-900" id="kpi-imps">727,358</div>
+      <div class="text-xs text-indigo-600 mt-1" id="kpi-imps-sub">GSC · CTR 1.11%</div>
     </div>
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
-      <div class="text-xs text-gray-500 mb-1">総記事数（WP）</div>
-      <div class="text-2xl font-bold text-gray-900">768</div>
-      <div class="text-xs text-yellow-600 mt-1">draft 97本 残</div>
+      <div class="text-xs text-gray-500 mb-1">公開記事数（WP）</div>
+      <div class="text-2xl font-bold text-gray-900" id="kpi-pub">768</div>
+      <div class="text-xs text-yellow-600 mt-1" id="kpi-pub-sub">draft 97本 残</div>
     </div>
   </div>
 
@@ -599,42 +599,93 @@
   </div>
 </div>
 
-<footer class="text-center text-xs text-gray-400 py-6">弁護士法人ブライト 内部資料 · 外部公開禁止 · 更新: 2026-05-16 09:34 JST</footer>
+<footer class="text-center text-xs text-gray-400 py-6">弁護士法人ブライト 内部資料 · 外部公開禁止 · 更新: 2026-05-16 09:58 JST</footer>
 
 <script>
+// ── データ ──────────────────────────────────────────
 const ga4Labels   = ["04/16", "04/17", "04/18", "04/19", "04/20", "04/21", "04/22", "04/23", "04/24", "04/25", "04/26", "04/27", "04/28", "04/29", "04/30", "05/01", "05/02", "05/03", "05/04", "05/05", "05/06", "05/07", "05/08", "05/09", "05/10", "05/11", "05/12", "05/13", "05/14", "05/15"];
 const ga4Sessions = [738, 744, 300, 259, 746, 848, 790, 787, 715, 345, 279, 943, 1026, 423, 1041, 989, 422, 335, 367, 356, 403, 1084, 1186, 456, 334, 1238, 1253, 1147, 1216, 1137];
 const ga4Conv     = [3, 6, 5, 1, 3, 8, 2, 4, 0, 3, 4, 6, 7, 5, 4, 23, 31, 4, 2, 1, 4, 16, 12, 1, 1, 11, 8, 5, 20, 5];
 const gscLabels   = ["04-18", "04-19", "04-20", "04-21", "04-22", "04-23", "04-24", "04-25", "04-26", "04-27", "04-28", "04-29", "04-30", "05-01", "05-02", "05-03", "05-04", "05-05", "05-06", "05-07", "05-08", "05-09", "05-10", "05-11", "05-12", "05-13", "05-14", "05-15"];
 const gscClicks   = [135, 262, 363, 331, 342, 344, 209, 168, 249, 370, 232, 270, 342, 227, 150, 160, 162, 179, 311, 447, 312, 164, 373, 476, 429, 440, 452, 143];
 const gscImps     = [23775, 33809, 35177, 30340, 29632, 30726, 20412, 16122, 25293, 29351, 20768, 25881, 29738, 20850, 15371, 15494, 15551, 17288, 28181, 34809, 24490, 19283, 30135, 36912, 35767, 35453, 33888, 12862];
+const GA4_TOTAL   = 21907;
+const catMetrics  = {"all": {"clicks": 4319, "imps": 256191, "ctr": 1.69, "pos": 6.6, "pub": 768, "draft": 97}, "komon": {"clicks": 478, "imps": 15104, "ctr": 3.16, "pos": 6.7, "pub": 203, "draft": 49}, "rosai": {"clicks": 3250, "imps": 214987, "ctr": 1.51, "pos": 6.5, "pub": 0, "draft": 0}, "kotsu": {"clicks": 193, "imps": 9764, "ctr": 1.98, "pos": 9.9, "pub": 261, "draft": 1}, "other": {"clicks": 398, "imps": 16336, "ctr": 2.44, "pos": 6.2, "pub": 304, "draft": 47}};
 
-new Chart(document.getElementById('chartSessions'), {
-  type: 'line',
-  data: { labels: ga4Labels, datasets: [{ label: 'セッション', data: ga4Sessions, borderColor: '#6366f1', backgroundColor: '#6366f115', fill: true, tension: 0.3, pointRadius: 2 }] },
-  options: { responsive: true, plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } }, scales: { x: { ticks: { maxRotation: 45, font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } } }
+const CAT_COLORS = { all:'#6366f1', komon:'#10b981', rosai:'#ef4444', kotsu:'#f59e0b', other:'#64748b' };
+const CAT_LABELS = { all:'全ジャンル', komon:'企業法務', rosai:'労災', kotsu:'交通事故', other:'その他' };
+
+// ── チャート ──────────────────────────────────────────
+const chartOpts = (color) => ({
+  responsive: true,
+  plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+  scales: { x: { ticks: { maxRotation: 45, font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } }
 });
-new Chart(document.getElementById('chartConv'), {
+
+const chartSessions = new Chart(document.getElementById('chartSessions'), {
+  type: 'line',
+  data: { labels: ga4Labels, datasets: [{ label: 'セッション', data: ga4Sessions,
+    borderColor: '#6366f1', backgroundColor: '#6366f115', fill: true, tension: 0.3, pointRadius: 2 }] },
+  options: chartOpts()
+});
+const chartConv = new Chart(document.getElementById('chartConv'), {
   type: 'bar',
   data: { labels: ga4Labels, datasets: [{ label: 'CV', data: ga4Conv, backgroundColor: '#10b981aa' }] },
-  options: { responsive: true, plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } }, scales: { x: { ticks: { maxRotation: 45, font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } } }
+  options: chartOpts()
 });
-new Chart(document.getElementById('chartClicks'), {
+const chartClicks = new Chart(document.getElementById('chartClicks'), {
   type: 'line',
   data: { labels: gscLabels, datasets: [
-    { label: 'クリック', data: gscClicks, borderColor: '#f59e0b', backgroundColor: '#f59e0b15', fill: true, tension: 0.3, pointRadius: 2, yAxisID: 'y' },
-    { label: '表示（÷100）', data: gscImps.map(v=>Math.round(v/100)), borderColor: '#94a3b8', borderDash: [4,4], tension: 0.3, pointRadius: 0, yAxisID: 'y' }
+    { label: 'クリック', data: gscClicks, borderColor: '#f59e0b', backgroundColor: '#f59e0b15', fill: true, tension: 0.3, pointRadius: 2 },
+    { label: '表示（÷100）', data: gscImps.map(v=>Math.round(v/100)), borderColor: '#94a3b8', borderDash: [4,4], tension: 0.3, pointRadius: 0 }
   ] },
   options: { responsive: true, plugins: { legend: { display: true, labels: { font: { size: 10 } } }, tooltip: { mode: 'index', intersect: false } }, scales: { x: { ticks: { maxRotation: 45, font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } } }
 });
-new Chart(document.getElementById('chartCpt'), {
+const cptData = [203, 0, 261, 304];
+const cptColors = ['#10b981','#ef4444','#f59e0b','#64748b'];
+const chartCpt = new Chart(document.getElementById('chartCpt'), {
   type: 'doughnut',
   data: {
     labels: ['🏢 企業法務', '⚠️ 労災', '🚗 交通事故', '📋 その他'],
-    datasets: [{ data: [203, 0, 261, 304], backgroundColor: ['#10b981','#ef4444','#f59e0b','#64748b'], borderWidth: 1 }]
+    datasets: [{ data: cptData, backgroundColor: cptColors, borderWidth: 1 }]
   },
   options: { responsive: true, plugins: { legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 12 } } } }
 });
+
+// ── KPI更新 ──────────────────────────────────────────
+function fmt(n) { return Number(n).toLocaleString('ja-JP'); }
+
+function updateKpiCards(cat) {
+  const m = catMetrics[cat];
+  const label = CAT_LABELS[cat];
+  const isAll = cat === 'all';
+
+  // セッション：GA4はジャンル別内訳なし → 全体値を常時表示
+  document.getElementById('kpi-sessions').textContent = fmt(GA4_TOTAL);
+  document.getElementById('kpi-sessions-sub').textContent = isAll ? 'GA4 · 全ジャンル計' : 'GA4 · ※全体値（ジャンル別内訳なし）';
+
+  // クリック
+  document.getElementById('kpi-clicks').textContent = fmt(m.clicks);
+  document.getElementById('kpi-clicks-sub').textContent = `GSC · ${label} 平均順位 ${m.pos}位`;
+
+  // インプレッション
+  document.getElementById('kpi-imps').textContent = fmt(m.imps);
+  document.getElementById('kpi-imps-sub').textContent = `GSC · ${label} CTR ${m.ctr}%`;
+
+  // 記事数
+  document.getElementById('kpi-pub').textContent = fmt(m.pub);
+  document.getElementById('kpi-pub-sub').textContent = `draft ${m.draft}本 残`;
+
+  // ドーナツチャートのハイライト
+  const catIdx = { all: -1, komon: 0, rosai: 1, kotsu: 2, other: 3 }[cat];
+  chartCpt.data.datasets[0].backgroundColor = cptColors.map((c, i) =>
+    catIdx === -1 ? c : (i === catIdx ? c : c + '44')
+  );
+  chartCpt.data.datasets[0].borderWidth = cptColors.map((c, i) =>
+    catIdx === -1 ? 1 : (i === catIdx ? 3 : 1)
+  );
+  chartCpt.update();
+}
 
 // ── フィルター ──────────────────────────────────────
 let currentFilter = 'all';
@@ -647,6 +698,7 @@ function setFilter(cat, btn) {
   if (cat === 'all') btn.classList.add('active');
   else btn.classList.add('active-' + cat);
 
+  updateKpiCards(cat);
   applyFilter();
 }
 
