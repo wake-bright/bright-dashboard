@@ -177,6 +177,91 @@ def fetch_ga4(days=30):
         return None
 
 
+def fetch_ga4_timeseries_cat(days=30):
+    """GA4から日付×ページパス別セッション・CVを取得してジャンル別時系列に集計"""
+    if not HAS_GOOGLE:
+        return None
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/analytics.readonly"])
+        creds.refresh(google.auth.transport.requests.Request())
+        svc = build("analyticsdata", "v1beta", credentials=creds, cache_discovery=False)
+        end = date.today().strftime("%Y-%m-%d")
+        start = (date.today() - timedelta(days=days-1)).strftime("%Y-%m-%d")
+        resp = svc.properties().runReport(
+            property="properties/316908797",
+            body={
+                "dateRanges": [{"startDate": start, "endDate": end}],
+                "dimensions": [{"name": "date"}, {"name": "pagePath"}],
+                "metrics": [{"name": "sessions"}, {"name": "conversions"}],
+                "limit": 50000,
+                "orderBys": [{"dimension": {"dimensionName": "date"}}],
+            }
+        ).execute()
+        date_cat = defaultdict(lambda: defaultdict(lambda: {"s": 0, "cv": 0}))
+        for row in resp.get("rows", []):
+            d    = row["dimensionValues"][0]["value"]
+            path = row["dimensionValues"][1]["value"]
+            cat  = page_cat(f"https://law-bright.com{path}")
+            s    = int(row["metricValues"][0]["value"])
+            cv   = int(float(row["metricValues"][1]["value"]))
+            for c in ("all", cat):
+                date_cat[d][c]["s"]  += s
+                date_cat[d][c]["cv"] += cv
+        all_dates = sorted(date_cat.keys())
+        result = {}
+        for cat in ["all", "komon", "rosai", "kotsu", "other"]:
+            result[cat] = {
+                "labels":   [d[4:6]+"/"+d[6:] for d in all_dates],
+                "sessions": [date_cat[d][cat]["s"]  for d in all_dates],
+                "conv":     [date_cat[d][cat]["cv"] for d in all_dates],
+            }
+        print(f"  GA4 時系列 by cat: {len(all_dates)}日分")
+        return result
+    except Exception as e:
+        print(f"  GA4 時系列 by cat エラー: {e}")
+        return None
+
+
+def fetch_gsc_timeseries_cat(days=28):
+    """GSCから日付×ページ別クリック・表示回数を取得してジャンル別時系列に集計"""
+    if not HAS_GOOGLE:
+        return None
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
+        creds.refresh(google.auth.transport.requests.Request())
+        svc = build("searchconsole", "v1", credentials=creds, cache_discovery=False)
+        end   = (date.today() - timedelta(days=2)).strftime("%Y-%m-%d")
+        start = (date.today() - timedelta(days=days+1)).strftime("%Y-%m-%d")
+        resp = svc.searchanalytics().query(
+            siteUrl="https://law-bright.com/",
+            body={"startDate": start, "endDate": end,
+                  "dimensions": ["date", "page"], "rowLimit": 25000}
+        ).execute()
+        date_cat = defaultdict(lambda: defaultdict(lambda: {"cl": 0, "im": 0}))
+        for row in resp.get("rows", []):
+            d   = row["keys"][0]
+            url = row["keys"][1]
+            cat = page_cat(url)
+            cl  = int(row["clicks"])
+            im  = int(row["impressions"])
+            for c in ("all", cat):
+                date_cat[d][c]["cl"] += cl
+                date_cat[d][c]["im"] += im
+        all_dates = sorted(date_cat.keys())
+        result = {}
+        for cat in ["all", "komon", "rosai", "kotsu", "other"]:
+            result[cat] = {
+                "labels": [d[5:] for d in all_dates],
+                "clicks": [date_cat[d][cat]["cl"] for d in all_dates],
+                "imps":   [date_cat[d][cat]["im"] for d in all_dates],
+            }
+        print(f"  GSC 時系列 by cat: {len(all_dates)}日分")
+        return result
+    except Exception as e:
+        print(f"  GSC 時系列 by cat エラー: {e}")
+        return None
+
+
 def fetch_gsc_daily(days=28):
     """GSC APIから日次クリック・表示回数を取得"""
     if not HAS_GOOGLE:
@@ -391,7 +476,8 @@ def calc_article_change(curr: dict, prev: dict) -> tuple:
     return pos_str, clk_str, status
 
 
-def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, ga4_cat=None):
+def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, ga4_cat=None,
+                  ga4_ts_cat=None, gsc_ts_cat=None):
     total_pub   = sum(c["publish"] for c in cpt_data)
     total_draft = sum(c["draft"]   for c in cpt_data)
 
@@ -894,6 +980,8 @@ const gscImps     = {json.dumps(gsc_imps)};
 const GA4_TOTAL   = {ga4_sessions};
 const catMetrics  = {cat_metrics_js};
 const ARTICLES    = {json.dumps(articles_data or [])};
+const GA4_TS      = {json.dumps(ga4_ts_cat  or {})};
+const GSC_TS      = {json.dumps(gsc_ts_cat  or {})};
 
 const CAT_COLORS = {{ all:'#6366f1', komon:'#10b981', rosai:'#ef4444', kotsu:'#f59e0b', other:'#64748b' }};
 const CAT_LABELS = {{ all:'全ジャンル', komon:'企業法務', rosai:'労災', kotsu:'交通事故', other:'その他' }};
@@ -962,6 +1050,24 @@ function updateKpiCards(cat) {{
   // 記事数
   document.getElementById('kpi-pub').textContent = fmt(m.pub);
   document.getElementById('kpi-pub-sub').textContent = `draft ${{m.draft}}本 残`;
+
+  // 時系列グラフ更新
+  const ga4ts = GA4_TS[cat] || GA4_TS['all'];
+  const gscTs = GSC_TS[cat] || GSC_TS['all'];
+  if (ga4ts && ga4ts.labels && ga4ts.labels.length) {{
+    chartSessions.data.labels = ga4ts.labels;
+    chartSessions.data.datasets[0].data = ga4ts.sessions;
+    chartSessions.update('none');
+    chartConv.data.labels = ga4ts.labels;
+    chartConv.data.datasets[0].data = ga4ts.conv;
+    chartConv.update('none');
+  }}
+  if (gscTs && gscTs.labels && gscTs.labels.length) {{
+    chartClicks.data.labels = gscTs.labels;
+    chartClicks.data.datasets[0].data = gscTs.clicks;
+    chartClicks.data.datasets[1].data = gscTs.imps.map(v => Math.round(v / 100));
+    chartClicks.update('none');
+  }}
 
   // ドーナツチャートのハイライト
   const catIdx = {{ all: -1, komon: 0, rosai: 1, kotsu: 2, other: 3 }}[cat];
@@ -1394,10 +1500,12 @@ if __name__ == "__main__":
 
     # GA4/GSC: APIから取得 → 失敗時はフォールバックデータを使用
     print("⏳ GA4/GSCデータを取得中...")
-    GA4_LIVE      = fetch_ga4(days=30)
-    GA4_CAT_LIVE  = fetch_ga4_by_cat(days=30)
-    GSC_LIVE      = fetch_gsc_daily(days=28)
-    GSC_PAGES_LIVE = fetch_gsc_pages(days=28, limit=20)
+    GA4_LIVE        = fetch_ga4(days=30)
+    GA4_CAT_LIVE    = fetch_ga4_by_cat(days=30)
+    GA4_TS_LIVE     = fetch_ga4_timeseries_cat(days=30)
+    GSC_LIVE        = fetch_gsc_daily(days=28)
+    GSC_PAGES_LIVE  = fetch_gsc_pages(days=28, limit=20)
+    GSC_TS_LIVE     = fetch_gsc_timeseries_cat(days=28)
 
     # ── フォールバックデータ（APIが使えない場合） ──────────────
     GA4_DATA = GA4_LIVE or [
@@ -1510,7 +1618,8 @@ if __name__ == "__main__":
     print(f"  記事管理: {len(articles_data)}本 マージ完了")
 
     print("⏳ HTML生成中...")
-    html = generate_html(cpt_data, GA4_DATA, GSC_DAILY, GSC_PAGES, articles_data, GA4_CAT_LIVE)
+    html = generate_html(cpt_data, GA4_DATA, GSC_DAILY, GSC_PAGES, articles_data,
+                         GA4_CAT_LIVE, GA4_TS_LIVE, GSC_TS_LIVE)
     out_path = Path(__file__).parent / "docs" / "index.html"
     out_path.parent.mkdir(exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
