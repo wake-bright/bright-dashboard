@@ -561,8 +561,198 @@ def calc_article_change(curr: dict, prev: dict) -> tuple:
     return pos_str, clk_str, status
 
 
+def fetch_inquiry_data():
+    """AppSheet問合せアプリ（a9703058）のPROJECT_inquiriesを取得して集計する。
+    失敗時はキャッシュにフォールバック。"""
+    cache_path = Path.home() / "bright-seo-report" / "data" / "appsheet_cache" / "inquiries.json"
+    env_path   = Path.home() / "bright-seo-report" / ".env"
+
+    # 環境変数読み込み
+    app_id = key = ""
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip(); v = v.strip().strip('"').strip("'")
+            if k == "APPSHEET_INQUIRY_APP_ID":
+                app_id = v
+            elif k == "APPSHEET_INQUIRY_ACCESS_KEY":
+                key = v
+
+    rows = None
+    if app_id and key:
+        try:
+            url = f"https://api.appsheet.com/api/v2/apps/{app_id}/tables/PROJECT_inquiries/Action"
+            headers = {"ApplicationAccessKey": key, "Content-Type": "application/json"}
+            body = {"Action": "Find", "Properties": {}, "Rows": []}
+            r = requests.post(url, json=body, headers=headers, timeout=60)
+            r.raise_for_status()
+            data = r.json()
+            rows = data if isinstance(data, list) else []
+            print(f"  AppSheet問合せ: {len(rows)}件取得")
+            # キャッシュ更新
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"  AppSheet問合せ APIエラー（キャッシュにフォールバック）: {e}")
+
+    if rows is None:
+        if cache_path.exists():
+            try:
+                rows = json.loads(cache_path.read_text(encoding="utf-8"))
+                print(f"  AppSheet問合せ: キャッシュから{len(rows)}件")
+            except Exception:
+                pass
+
+    if not rows:
+        print("  AppSheet問合せ: データなし")
+        return None
+
+    def parse_date(s):
+        """MM/DD/YYYY HH:MM:SS または MM/DD/YYYY → date"""
+        if not s:
+            return None
+        try:
+            return datetime.strptime(s.strip()[:10], "%m/%d/%Y").date()
+        except Exception:
+            return None
+
+    def inq_status(r):
+        if r.get("contracted_on", ""):
+            return "受任済"
+        lose = r.get("lose_reason", "") or r.get("not_contract_reason", "")
+        prog = r.get("project_progress", "")
+        if lose or "不成立" in prog or "クローズ" in prog:
+            return "不成立"
+        if "相談" in prog:
+            return "相談中"
+        return "問い合わせ中"
+
+    def inq_cat(r):
+        cat = r.get("case_category_large", "")
+        if "労災" in cat:
+            return "rosai"
+        if "交通" in cat:
+            return "kotsu"
+        if any(k in cat for k in ("顧問", "企業", "法務")):
+            return "komon"
+        return "other"
+
+    today = date.today()
+    this_month_key = today.strftime("%Y-%m")
+    prev_month_date = (today.replace(day=1) - timedelta(days=1))
+    prev_month_key  = prev_month_date.strftime("%Y-%m")
+
+    # 直近12ヶ月のリスト
+    months = []
+    for i in range(11, -1, -1):
+        d = (today.replace(day=1) - timedelta(days=i * 30))
+        months.append(d.strftime("%Y-%m"))
+    # 重複除去・ソート
+    months = sorted(set(months))[-12:]
+
+    monthly_inq  = {m: {"komon": 0, "rosai": 0, "kotsu": 0, "other": 0} for m in months}
+    monthly_cont = {m: {"komon": 0, "rosai": 0, "kotsu": 0, "other": 0} for m in months}
+
+    status_summary = {
+        "問い合わせ中": {"komon": 0, "rosai": 0, "kotsu": 0, "other": 0, "total": 0},
+        "相談中":       {"komon": 0, "rosai": 0, "kotsu": 0, "other": 0, "total": 0},
+        "受任済":       {"komon": 0, "rosai": 0, "kotsu": 0, "other": 0, "total": 0},
+        "不成立":       {"komon": 0, "rosai": 0, "kotsu": 0, "other": 0, "total": 0},
+    }
+
+    source_counter = defaultdict(int)
+    contracted_total = 0
+    this_month_cnt = prev_month_cnt = 0
+
+    recent_rows = []
+
+    for r in rows:
+        rec_date = parse_date(r.get("recepted_on", ""))
+        cont_date = parse_date(r.get("contracted_on", ""))
+        cat = inq_cat(r)
+        st  = inq_status(r)
+
+        # 月次問い合わせ集計（recepted_on基準）
+        if rec_date:
+            mk = rec_date.strftime("%Y-%m")
+            if mk in monthly_inq:
+                monthly_inq[mk][cat] += 1
+            if mk == this_month_key:
+                this_month_cnt += 1
+            if mk == prev_month_key:
+                prev_month_cnt += 1
+
+        # 月次受任集計（contracted_on基準）
+        if cont_date:
+            mk = cont_date.strftime("%Y-%m")
+            if mk in monthly_cont:
+                monthly_cont[mk][cat] += 1
+            contracted_total += 1
+
+        # ステータス×ジャンル（is_archive != 'Y' のみ）
+        if r.get("is_archive", "") != "Y":
+            if st in status_summary:
+                status_summary[st][cat]     += 1
+                status_summary[st]["total"] += 1
+
+        # 流入経路
+        src = (r.get("source_label", "") or r.get("source_how", "") or "不明").strip() or "不明"
+        source_counter[src] += 1
+
+        # 最新30件用
+        recent_rows.append({
+            "_date": rec_date,
+            "date":   r.get("recepted_on", "")[:10] if r.get("recepted_on") else "",
+            "name":   r.get("label", "").split("_")[0] if r.get("label") else "",
+            "cat":    r.get("case_category_large", "その他"),
+            "cat_key": cat,
+            "source": src,
+            "status": st,
+            "lawyer": r.get("consulted_lawyer_id", ""),   # IDのみ（名前解決は省略）
+            "url":    r.get("drive_url", "") or r.get("chat_url", ""),
+        })
+
+    # 直近30件（受付日降順）
+    recent_sorted = sorted(
+        [x for x in recent_rows if x["_date"]],
+        key=lambda x: x["_date"],
+        reverse=True
+    )[:30]
+    recent = [{k: v for k, v in r.items() if k != "_date"} for r in recent_sorted]
+
+    top_sources = sorted(
+        [{"src": k, "cnt": v} for k, v in source_counter.items()],
+        key=lambda x: -x["cnt"]
+    )[:8]
+
+    total = len(rows)
+    cont_rate = round(contracted_total / total * 100, 1) if total else 0.0
+
+    return {
+        "total":          total,
+        "contracted":     contracted_total,
+        "cont_rate":      cont_rate,
+        "this_month":     this_month_cnt,
+        "prev_month":     prev_month_cnt,
+        "synced_at":      datetime.now(JST).strftime("%Y-%m-%d %H:%M JST"),
+        "months":         months,
+        "monthly_inq":    monthly_inq,
+        "monthly_cont":   monthly_cont,
+        "status_summary": status_summary,
+        "top_sources":    top_sources,
+        "recent":         recent,
+    }
+
+
 def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, ga4_cat=None,
-                  ga4_ts_cat=None, gsc_ts_cat=None, ga4_ts_prev=None, gsc_ts_prev=None):
+                  ga4_ts_cat=None, gsc_ts_cat=None, ga4_ts_prev=None, gsc_ts_prev=None,
+                  inquiry_data=None):
     total_pub   = sum(c["publish"] for c in cpt_data)
     total_draft = sum(c["draft"]   for c in cpt_data)
 
@@ -849,6 +1039,7 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
       <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('artmgr',this)">📋 記事管理</button>
       <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('tasks',this)">✅ タスク</button>
       <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('info',this)">ℹ️ 基本情報</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('inquiry',this)">📞 問い合わせ</button>
       <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('sitemap',this)">🗺️ サイトマップ</button>
     </div>
 
@@ -1004,6 +1195,102 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
       </div>
     </div>
 
+    <!-- 問い合わせタブ -->
+    <div id="tab-inquiry" class="tab-content">
+      <div class="p-5">
+        <div id="inq-nodata" class="hidden text-center text-gray-400 py-10">問い合わせデータなし</div>
+        <div id="inq-main">
+          <!-- KPIカード4枚 -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+            <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-blue-100">
+              <div class="text-xs text-gray-500 mb-1">今月問い合わせ</div>
+              <div class="flex items-baseline gap-1.5 flex-wrap">
+                <div class="text-2xl font-bold text-gray-900" id="inq-kpi-this">—</div>
+                <span class="text-xs font-bold" id="inq-kpi-delta"></span>
+              </div>
+              <div class="text-xs text-blue-600 mt-1">前月: <span id="inq-kpi-prev">—</span>件</div>
+            </div>
+            <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-purple-100">
+              <div class="text-xs text-gray-500 mb-1">現在 相談中</div>
+              <div class="text-2xl font-bold text-purple-700" id="inq-kpi-consult">—</div>
+              <div class="text-xs text-purple-500 mt-1">アクティブ案件</div>
+            </div>
+            <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-green-100">
+              <div class="text-xs text-gray-500 mb-1">受任済累計</div>
+              <div class="text-2xl font-bold text-green-700" id="inq-kpi-contracted">—</div>
+              <div class="text-xs text-green-500 mt-1">全期間</div>
+            </div>
+            <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-indigo-100">
+              <div class="text-xs text-gray-500 mb-1">受任率</div>
+              <div class="text-2xl font-bold text-indigo-700" id="inq-kpi-rate">—</div>
+              <div class="text-xs text-indigo-500 mt-1">全問い合わせ対比</div>
+            </div>
+          </div>
+
+          <!-- グラフ2本 -->
+          <div class="grid md:grid-cols-2 gap-5 mb-5">
+            <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+              <div class="text-sm font-semibold text-gray-700 mb-3">月次問い合わせ数（ジャンル別）</div>
+              <canvas id="chartInqMonthly" height="200"></canvas>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+              <div class="text-sm font-semibold text-gray-700 mb-3">月次受任数（ジャンル別）</div>
+              <canvas id="chartContMonthly" height="200"></canvas>
+            </div>
+          </div>
+
+          <!-- ステータス×ジャンル テーブル -->
+          <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-5">
+            <div class="px-4 pt-4 pb-2 text-sm font-semibold text-gray-700">ステータス × ジャンル（アーカイブ除く）</div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                    <th class="px-4 py-2 text-left">ステータス</th>
+                    <th class="px-4 py-2 text-center">全体</th>
+                    <th class="px-4 py-2 text-center">🏢 企業法務</th>
+                    <th class="px-4 py-2 text-center">⚠️ 労災</th>
+                    <th class="px-4 py-2 text-center">🚗 交通事故</th>
+                    <th class="px-4 py-2 text-center">📋 その他</th>
+                  </tr>
+                </thead>
+                <tbody id="inq-status-tbody" class="divide-y divide-gray-100"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 流入経路トップ8 -->
+          <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-5 p-4">
+            <div class="text-sm font-semibold text-gray-700 mb-3">流入経路トップ8</div>
+            <div id="inq-sources" class="space-y-2"></div>
+          </div>
+
+          <!-- 最新30件テーブル -->
+          <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+            <div class="px-4 pt-4 pb-2 text-sm font-semibold text-gray-700">最新30件</div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs">
+                <thead>
+                  <tr class="bg-gray-50 text-gray-500 uppercase tracking-wide">
+                    <th class="px-3 py-2 text-left">受付日</th>
+                    <th class="px-3 py-2 text-left">氏名</th>
+                    <th class="px-3 py-2 text-left">ジャンル</th>
+                    <th class="px-3 py-2 text-left">流入経路</th>
+                    <th class="px-3 py-2 text-left">ステータス</th>
+                    <th class="px-3 py-2 text-left">担当</th>
+                    <th class="px-3 py-2 text-center">リンク</th>
+                  </tr>
+                </thead>
+                <tbody id="inq-tbody" class="divide-y divide-gray-100"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="text-xs text-gray-400 mt-2 text-right">取得日時: <span id="inq-synced"></span></div>
+        </div>
+      </div>
+    </div>
+
     <!-- サイトマップタブ -->
     <div id="tab-sitemap" class="tab-content">
       <div class="p-5">
@@ -1101,6 +1388,7 @@ const GA4_TS      = {json.dumps(ga4_ts_cat  or {})};
 const GSC_TS      = {json.dumps(gsc_ts_cat  or {})};
 const GA4_TS_PREV = {json.dumps(ga4_ts_prev or {})};
 const GSC_TS_PREV = {json.dumps(gsc_ts_prev or {})};
+const INQ = {json.dumps(inquiry_data or {})};
 
 const CAT_COLORS = {{ all:'#6366f1', komon:'#10b981', rosai:'#ef4444', kotsu:'#f59e0b', other:'#64748b' }};
 const CAT_LABELS = {{ all:'全ジャンル', komon:'企業法務', rosai:'労災', kotsu:'交通事故', other:'その他' }};
@@ -1715,6 +2003,150 @@ function smSortTable(col) {{
   }});
   smRenderTable(smAllRows);
 }}
+
+// ── 問い合わせタブ初期化 ──────────────────────────────────────
+(function initInquiry() {{
+  if (!INQ || !INQ.recent) {{
+    const nd = document.getElementById('inq-nodata');
+    const mn = document.getElementById('inq-main');
+    if (nd) nd.classList.remove('hidden');
+    if (mn) mn.classList.add('hidden');
+    return;
+  }}
+
+  // KPIカード更新
+  const setEl = (id, val) => {{ const el = document.getElementById(id); if (el) el.textContent = val; }};
+  setEl('inq-kpi-this',       INQ.this_month ?? '—');
+  setEl('inq-kpi-prev',       INQ.prev_month ?? '—');
+  setEl('inq-kpi-contracted', INQ.contracted ?? '—');
+  setEl('inq-kpi-rate',       (INQ.cont_rate ?? '—') + '%');
+  setEl('inq-synced',         INQ.synced_at ?? '');
+
+  // 今月前月差分バッジ
+  const deltaEl = document.getElementById('inq-kpi-delta');
+  if (deltaEl && INQ.prev_month > 0) {{
+    const d = (INQ.this_month || 0) - (INQ.prev_month || 0);
+    deltaEl.textContent = (d >= 0 ? '▲+' : '▼') + d + '件';
+    deltaEl.className = 'text-xs font-bold ' + (d >= 0 ? 'text-green-600' : 'text-red-600');
+  }}
+
+  // 相談中件数
+  const ss = INQ.status_summary || {{}};
+  const consultTotal = (ss['相談中'] || {{}}).total || 0;
+  setEl('inq-kpi-consult', consultTotal);
+
+  // グラフ
+  const months = INQ.months || [];
+  const catColors = {{komon:'#10b981', rosai:'#ef4444', kotsu:'#f59e0b', other:'#94a3b8'}};
+  const catLabels = {{komon:'企業法務', rosai:'労災', kotsu:'交通事故', other:'その他'}};
+  const stackedOpts = {{
+    responsive: true,
+    scales: {{ x: {{ stacked: true, ticks: {{ font: {{ size: 10 }} }} }}, y: {{ stacked: true, ticks: {{ font: {{ size: 10 }} }} }} }},
+    plugins: {{ legend: {{ position: 'bottom', labels: {{ font: {{ size: 10 }}, boxWidth: 12 }} }},
+                tooltip: {{ mode: 'index', intersect: false }} }}
+  }};
+
+  const makeDatasets = (monthlyObj) =>
+    ['komon','rosai','kotsu','other'].map(c => ({{
+      label: catLabels[c],
+      data: months.map(m => ((monthlyObj[m] || {{}})[c] || 0)),
+      backgroundColor: catColors[c] + 'cc',
+      stack: 's'
+    }}));
+
+  const inqCanvas = document.getElementById('chartInqMonthly');
+  if (inqCanvas) {{
+    new Chart(inqCanvas, {{
+      type: 'bar',
+      data: {{ labels: months, datasets: makeDatasets(INQ.monthly_inq || {{}}) }},
+      options: stackedOpts
+    }});
+  }}
+
+  const contCanvas = document.getElementById('chartContMonthly');
+  if (contCanvas) {{
+    new Chart(contCanvas, {{
+      type: 'bar',
+      data: {{ labels: months, datasets: makeDatasets(INQ.monthly_cont || {{}}) }},
+      options: stackedOpts
+    }});
+  }}
+
+  // ステータス×ジャンル テーブル
+  const statusTbody = document.getElementById('inq-status-tbody');
+  if (statusTbody) {{
+    const statuses = ['問い合わせ中','相談中','受任済','不成立'];
+    const statusColors = {{
+      '問い合わせ中': 'bg-blue-100 text-blue-700',
+      '相談中':       'bg-purple-100 text-purple-700',
+      '受任済':       'bg-green-100 text-green-700',
+      '不成立':       'bg-gray-100 text-gray-600',
+    }};
+    statusTbody.innerHTML = statuses.map(st => {{
+      const row = ss[st] || {{}};
+      const cls = statusColors[st] || 'bg-gray-100 text-gray-600';
+      return `<tr class="hover:bg-gray-50 transition-colors">
+        <td class="px-4 py-2"><span class="inline-block ${{cls}} text-xs font-semibold px-2 py-1 rounded-full">${{st}}</span></td>
+        <td class="px-4 py-2 text-center font-bold text-gray-800">${{row.total ?? 0}}</td>
+        <td class="px-4 py-2 text-center text-emerald-700">${{row.komon ?? 0}}</td>
+        <td class="px-4 py-2 text-center text-red-700">${{row.rosai ?? 0}}</td>
+        <td class="px-4 py-2 text-center text-amber-700">${{row.kotsu ?? 0}}</td>
+        <td class="px-4 py-2 text-center text-gray-600">${{row.other ?? 0}}</td>
+      </tr>`;
+    }}).join('');
+  }}
+
+  // 流入経路トップ8
+  const srcEl = document.getElementById('inq-sources');
+  if (srcEl && INQ.top_sources) {{
+    const maxCnt = Math.max(...INQ.top_sources.map(s => s.cnt), 1);
+    srcEl.innerHTML = INQ.top_sources.map(s => {{
+      const pct = Math.round(s.cnt / maxCnt * 100);
+      return `<div class="flex items-center gap-3">
+        <div class="w-28 text-xs text-gray-600 text-right truncate flex-shrink-0" title="${{s.src}}">${{s.src}}</div>
+        <div class="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
+          <div class="h-4 bg-indigo-400 rounded-full transition-all" style="width:${{pct}}%"></div>
+        </div>
+        <div class="w-8 text-xs text-gray-600 font-semibold text-right">${{s.cnt}}</div>
+      </div>`;
+    }}).join('');
+  }}
+
+  // 最新30件テーブル
+  const tbody = document.getElementById('inq-tbody');
+  if (tbody && INQ.recent) {{
+    const catBadge = {{
+      komon: 'bg-emerald-100 text-emerald-700',
+      rosai: 'bg-red-100 text-red-700',
+      kotsu: 'bg-amber-100 text-amber-700',
+      other: 'bg-gray-100 text-gray-600',
+    }};
+    const catLabel = {{komon:'企業法務', rosai:'労災', kotsu:'交通事故', other:'その他'}};
+    const stBadge = {{
+      '問い合わせ中': 'bg-blue-100 text-blue-700',
+      '相談中':       'bg-purple-100 text-purple-700',
+      '受任済':       'bg-green-100 text-green-700',
+      '不成立':       'bg-gray-100 text-gray-600',
+    }};
+    tbody.innerHTML = INQ.recent.map(r => {{
+      const cb = catBadge[r.cat_key] || 'bg-gray-100 text-gray-600';
+      const cl = catLabel[r.cat_key] || r.cat;
+      const sb = stBadge[r.status]   || 'bg-gray-100 text-gray-600';
+      const link = r.url
+        ? `<a href="${{r.url}}" target="_blank" class="inline-block bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded hover:bg-indigo-200 transition-colors">開く</a>`
+        : '<span class="text-gray-300">—</span>';
+      return `<tr class="hover:bg-gray-50 transition-colors">
+        <td class="px-3 py-2 whitespace-nowrap text-gray-600">${{r.date}}</td>
+        <td class="px-3 py-2 text-gray-800">${{r.name || '—'}}</td>
+        <td class="px-3 py-2"><span class="inline-block ${{cb}} text-xs font-semibold px-2 py-0.5 rounded-full">${{cl}}</span></td>
+        <td class="px-3 py-2 text-gray-600 truncate max-w-[8rem]" title="${{r.source}}">${{r.source}}</td>
+        <td class="px-3 py-2"><span class="inline-block ${{sb}} text-xs font-semibold px-2 py-0.5 rounded-full">${{r.status}}</span></td>
+        <td class="px-3 py-2 text-gray-600">${{r.lawyer || '—'}}</td>
+        <td class="px-3 py-2 text-center">${{link}}</td>
+      </tr>`;
+    }}).join('');
+  }}
+}})();
 </script>
 </body>
 </html>"""
@@ -1828,6 +2260,10 @@ if __name__ == "__main__":
     GSC_DAILY  = GSC_LIVE  or GSC_DAILY_FALLBACK
     GSC_PAGES  = GSC_PAGES_LIVE or GSC_PAGES_FALLBACK
 
+    # AppSheet問い合わせデータ取得
+    print("⏳ AppSheet問い合わせデータ取得中...")
+    inquiry_data = fetch_inquiry_data()
+
     # 記事管理データ取得
     print("⏳ 記事管理データ取得中...")
     wp_articles = fetch_all_articles_wp()
@@ -1852,7 +2288,8 @@ if __name__ == "__main__":
     print("⏳ HTML生成中...")
     html = generate_html(cpt_data, GA4_DATA, GSC_DAILY, GSC_PAGES, articles_data,
                          GA4_CAT_LIVE, GA4_TS_LIVE, GSC_TS_LIVE,
-                         GA4_TS_PREV, GSC_TS_PREV)
+                         GA4_TS_PREV, GSC_TS_PREV,
+                         inquiry_data=inquiry_data)
     out_path = Path(__file__).parent / "docs" / "index.html"
     out_path.parent.mkdir(exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
