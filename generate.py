@@ -262,6 +262,91 @@ def fetch_gsc_timeseries_cat(days=28):
         return None
 
 
+def fetch_ga4_timeseries_prev(days=30):
+    """前期（同日数）の GA4 日付×ページパス別時系列を取得"""
+    if not HAS_GOOGLE:
+        return None
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/analytics.readonly"])
+        creds.refresh(google.auth.transport.requests.Request())
+        svc = build("analyticsdata", "v1beta", credentials=creds, cache_discovery=False)
+        end   = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
+        start = (date.today() - timedelta(days=days * 2 - 1)).strftime("%Y-%m-%d")
+        resp = svc.properties().runReport(
+            property="properties/316908797",
+            body={
+                "dateRanges": [{"startDate": start, "endDate": end}],
+                "dimensions": [{"name": "date"}, {"name": "pagePath"}],
+                "metrics": [{"name": "sessions"}, {"name": "conversions"}],
+                "limit": 50000,
+                "orderBys": [{"dimension": {"dimensionName": "date"}}],
+            }
+        ).execute()
+        date_cat = defaultdict(lambda: defaultdict(lambda: {"s": 0, "cv": 0}))
+        for row in resp.get("rows", []):
+            d    = row["dimensionValues"][0]["value"]
+            path = row["dimensionValues"][1]["value"]
+            cat  = page_cat(f"https://law-bright.com{path}")
+            s    = int(row["metricValues"][0]["value"])
+            cv   = int(float(row["metricValues"][1]["value"]))
+            for c in ("all", cat):
+                date_cat[d][c]["s"]  += s
+                date_cat[d][c]["cv"] += cv
+        all_dates = sorted(date_cat.keys())
+        result = {}
+        for cat in ["all", "komon", "rosai", "kotsu", "other"]:
+            result[cat] = {
+                "labels":   [d[4:6]+"/"+d[6:] for d in all_dates],
+                "sessions": [date_cat[d][cat]["s"]  for d in all_dates],
+                "conv":     [date_cat[d][cat]["cv"] for d in all_dates],
+            }
+        print(f"  GA4 前期時系列 by cat: {len(all_dates)}日分 ({start}〜{end})")
+        return result
+    except Exception as e:
+        print(f"  GA4 前期時系列 エラー: {e}")
+        return None
+
+
+def fetch_gsc_timeseries_prev(days=28):
+    """前期（同日数）の GSC 日付×ページ別クリック・表示回数を取得"""
+    if not HAS_GOOGLE:
+        return None
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
+        creds.refresh(google.auth.transport.requests.Request())
+        svc = build("searchconsole", "v1", credentials=creds, cache_discovery=False)
+        end   = (date.today() - timedelta(days=days + 2)).strftime("%Y-%m-%d")
+        start = (date.today() - timedelta(days=days * 2 + 1)).strftime("%Y-%m-%d")
+        resp = svc.searchanalytics().query(
+            siteUrl="https://law-bright.com/",
+            body={"startDate": start, "endDate": end,
+                  "dimensions": ["date", "page"], "rowLimit": 25000}
+        ).execute()
+        date_cat = defaultdict(lambda: defaultdict(lambda: {"cl": 0, "im": 0}))
+        for row in resp.get("rows", []):
+            d   = row["keys"][0]
+            url = row["keys"][1]
+            cat = page_cat(url)
+            cl  = int(row["clicks"])
+            im  = int(row["impressions"])
+            for c in ("all", cat):
+                date_cat[d][c]["cl"] += cl
+                date_cat[d][c]["im"] += im
+        all_dates = sorted(date_cat.keys())
+        result = {}
+        for cat in ["all", "komon", "rosai", "kotsu", "other"]:
+            result[cat] = {
+                "labels": [d[5:] for d in all_dates],
+                "clicks": [date_cat[d][cat]["cl"] for d in all_dates],
+                "imps":   [date_cat[d][cat]["im"] for d in all_dates],
+            }
+        print(f"  GSC 前期時系列 by cat: {len(all_dates)}日分 ({start}〜{end})")
+        return result
+    except Exception as e:
+        print(f"  GSC 前期時系列 エラー: {e}")
+        return None
+
+
 def fetch_gsc_daily(days=28):
     """GSC APIから日次クリック・表示回数を取得"""
     if not HAS_GOOGLE:
@@ -477,7 +562,7 @@ def calc_article_change(curr: dict, prev: dict) -> tuple:
 
 
 def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, ga4_cat=None,
-                  ga4_ts_cat=None, gsc_ts_cat=None):
+                  ga4_ts_cat=None, gsc_ts_cat=None, ga4_ts_prev=None, gsc_ts_prev=None):
     total_pub   = sum(c["publish"] for c in cpt_data)
     total_draft = sum(c["draft"]   for c in cpt_data)
 
@@ -636,6 +721,15 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
   .filter-btn.active-kotsu {{ background: #f59e0b; color: white; }}
   .filter-btn.active-other {{ background: #64748b; color: white; }}
   .am-filter-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
+  .period-btn {{ transition: all .12s; }}
+  .period-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
+  #compare-toggle {{ transition: all .12s; }}
+  #compare-toggle.compare-on {{ background: #7c3aed; color: white; border-color: #7c3aed; }}
+  .kpi-delta {{ font-size: 0.7rem; font-weight: 700; }}
+  .kpi-delta.up {{ color: #16a34a; }}
+  .kpi-delta.dn {{ color: #dc2626; }}
+  .compare-info {{ font-size: 0.65rem; color: #6366f1; margin-top: 2px; display: none; }}
+  .compare-info.visible {{ display: block; }}
 </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -660,7 +754,7 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
   </div>
 </header>
 
-<!-- ジャンルフィルター（グローバル） -->
+<!-- ジャンルフィルター + 期間セレクター（グローバル） -->
 <div class="bg-white border-b border-gray-100 sticky top-[57px] z-40">
   <div class="max-w-7xl mx-auto px-4 py-2 flex items-center gap-2 flex-wrap">
     <span class="text-xs text-gray-500 mr-1">ジャンル：</span>
@@ -669,6 +763,13 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
     <button class="filter-btn px-3 py-1 rounded-full text-xs font-semibold border border-red-300 text-red-700" onclick="setFilter('rosai', this)">⚠️ 労災</button>
     <button class="filter-btn px-3 py-1 rounded-full text-xs font-semibold border border-amber-300 text-amber-700" onclick="setFilter('kotsu', this)">🚗 交通事故</button>
     <button class="filter-btn px-3 py-1 rounded-full text-xs font-semibold border border-slate-300 text-slate-600" onclick="setFilter('other', this)">📋 その他</button>
+    <span class="text-gray-300 select-none">｜</span>
+    <span class="text-xs text-gray-500">期間：</span>
+    <button class="period-btn px-3 py-1 rounded-full text-xs font-semibold border border-gray-300 text-gray-600" onclick="setPeriod(7,this)">7日</button>
+    <button class="period-btn px-3 py-1 rounded-full text-xs font-semibold border border-gray-300 text-gray-600" onclick="setPeriod(14,this)">14日</button>
+    <button class="period-btn active px-3 py-1 rounded-full text-xs font-semibold border border-gray-300 text-gray-600" onclick="setPeriod(30,this)">30日</button>
+    <span class="text-gray-300 select-none">｜</span>
+    <button id="compare-toggle" class="px-3 py-1 rounded-full text-xs font-semibold border border-indigo-300 text-indigo-600" onclick="toggleCompare(this)">📊 前期比較</button>
   </div>
 </div>
 
@@ -677,23 +778,39 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
   <!-- KPIカード -->
   <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-5">
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
-      <div class="text-xs text-gray-500 mb-1">セッション（30日）</div>
-      <div class="text-2xl font-bold text-gray-900" id="kpi-sessions">{ga4_sessions:,}</div>
+      <div class="text-xs text-gray-500 mb-1" id="kpi-sessions-label">セッション（30日）</div>
+      <div class="flex items-baseline gap-1.5 flex-wrap">
+        <div class="text-2xl font-bold text-gray-900" id="kpi-sessions">{ga4_sessions:,}</div>
+        <span class="kpi-delta" id="kpi-sessions-delta"></span>
+      </div>
+      <div class="compare-info" id="kpi-sessions-prev"></div>
       <div class="text-xs text-indigo-600 mt-1" id="kpi-sessions-sub">GA4 · 全ジャンル計</div>
     </div>
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
-      <div class="text-xs text-gray-500 mb-1">コンバージョン（30日）</div>
-      <div class="text-2xl font-bold text-gray-900" id="kpi-conv">{ga4_conversions:,}</div>
+      <div class="text-xs text-gray-500 mb-1" id="kpi-conv-label">コンバージョン（30日）</div>
+      <div class="flex items-baseline gap-1.5 flex-wrap">
+        <div class="text-2xl font-bold text-gray-900" id="kpi-conv">{ga4_conversions:,}</div>
+        <span class="kpi-delta" id="kpi-conv-delta"></span>
+      </div>
+      <div class="compare-info" id="kpi-conv-prev"></div>
       <div class="text-xs text-green-600 mt-1" id="kpi-conv-sub">GA4 · 全ジャンル計</div>
     </div>
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
-      <div class="text-xs text-gray-500 mb-1">クリック（28日）</div>
-      <div class="text-2xl font-bold text-gray-900" id="kpi-clicks">{gsc_total_clicks:,}</div>
+      <div class="text-xs text-gray-500 mb-1" id="kpi-clicks-label">クリック（28日）</div>
+      <div class="flex items-baseline gap-1.5 flex-wrap">
+        <div class="text-2xl font-bold text-gray-900" id="kpi-clicks">{gsc_total_clicks:,}</div>
+        <span class="kpi-delta" id="kpi-clicks-delta"></span>
+      </div>
+      <div class="compare-info" id="kpi-clicks-prev"></div>
       <div class="text-xs text-indigo-600 mt-1" id="kpi-clicks-sub">GSC · 平均順位 {gsc_avg_pos}位</div>
     </div>
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
-      <div class="text-xs text-gray-500 mb-1">表示回数（28日）</div>
-      <div class="text-2xl font-bold text-gray-900" id="kpi-imps">{gsc_total_imps:,}</div>
+      <div class="text-xs text-gray-500 mb-1" id="kpi-imps-label">表示回数（28日）</div>
+      <div class="flex items-baseline gap-1.5 flex-wrap">
+        <div class="text-2xl font-bold text-gray-900" id="kpi-imps">{gsc_total_imps:,}</div>
+        <span class="kpi-delta" id="kpi-imps-delta"></span>
+      </div>
+      <div class="compare-info" id="kpi-imps-prev"></div>
       <div class="text-xs text-indigo-600 mt-1" id="kpi-imps-sub">GSC · CTR {gsc_avg_ctr}%</div>
     </div>
     <div class="kpi-card col-span-2 md:col-span-1 bg-white rounded-xl shadow-sm p-4 border border-gray-100">
@@ -982,6 +1099,8 @@ const catMetrics  = {cat_metrics_js};
 const ARTICLES    = {json.dumps(articles_data or [])};
 const GA4_TS      = {json.dumps(ga4_ts_cat  or {})};
 const GSC_TS      = {json.dumps(gsc_ts_cat  or {})};
+const GA4_TS_PREV = {json.dumps(ga4_ts_prev or {})};
+const GSC_TS_PREV = {json.dumps(gsc_ts_prev or {})};
 
 const CAT_COLORS = {{ all:'#6366f1', komon:'#10b981', rosai:'#ef4444', kotsu:'#f59e0b', other:'#64748b' }};
 const CAT_LABELS = {{ all:'全ジャンル', komon:'企業法務', rosai:'労災', kotsu:'交通事故', other:'その他' }};
@@ -1023,53 +1142,164 @@ const chartCpt = new Chart(document.getElementById('chartCpt'), {{
   options: {{ responsive: true, plugins: {{ legend: {{ position: 'right', labels: {{ font: {{ size: 11 }}, boxWidth: 12 }} }} }} }}
 }});
 
-// ── KPI更新 ──────────────────────────────────────────
+// ── KPI更新・期間比較 ──────────────────────────────────────────
 function fmt(n) {{ return Number(n).toLocaleString('ja-JP'); }}
 
+let selectedPeriod = 30;
+let compareOn = false;
+
+function sliceLast(arr, n) {{
+  if (!arr || !arr.length) return [];
+  return arr.slice(-Math.min(n, arr.length));
+}}
+function sumSlice(arr, n) {{
+  return sliceLast(arr, n).reduce((a, b) => a + b, 0);
+}}
+
+function setPeriod(n, btn) {{
+  selectedPeriod = n;
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  updateKpiCards(currentFilter);
+}}
+
+function toggleCompare(btn) {{
+  compareOn = !compareOn;
+  btn.classList.toggle('compare-on', compareOn);
+  btn.textContent = compareOn ? '📊 前期比較 ON' : '📊 前期比較';
+  document.querySelectorAll('.compare-info').forEach(el =>
+    el.classList.toggle('visible', compareOn)
+  );
+  updateKpiCards(currentFilter);
+}}
+
+function setDelta(elId, prevElId, curr, prev) {{
+  const el = document.getElementById(elId);
+  const pe = document.getElementById(prevElId);
+  if (!el) return;
+  if (!compareOn || !prev) {{
+    el.textContent = '';
+    el.className = 'kpi-delta';
+    if (pe) pe.textContent = '';
+    return;
+  }}
+  const d   = curr - prev;
+  const pct = prev > 0 ? (d / prev * 100) : 0;
+  const isPos = d >= 0;
+  el.textContent = (isPos ? '▲+' : '▼') + Math.abs(pct).toFixed(1) + '%';
+  el.className   = 'kpi-delta ' + (isPos ? 'up' : 'dn');
+  if (pe) pe.textContent = `前期: ${{fmt(prev)}}`;
+}}
+
 function updateKpiCards(cat) {{
-  const m = catMetrics[cat];
+  const m     = catMetrics[cat];
   const label = CAT_LABELS[cat];
-  const isAll = cat === 'all';
+  const p     = selectedPeriod;
 
-  // セッション（GA4 ページパス別集計）
-  document.getElementById('kpi-sessions').textContent = fmt(m.sessions);
-  document.getElementById('kpi-sessions-sub').textContent = `GA4 · ${{label}}`;
+  const ga4ts     = GA4_TS[cat]      || GA4_TS['all']      || null;
+  const ga4tsPrev = GA4_TS_PREV[cat] || GA4_TS_PREV['all'] || null;
+  const gscTs     = GSC_TS[cat]      || GSC_TS['all']      || null;
+  const gscTsPrev = GSC_TS_PREV[cat] || GSC_TS_PREV['all'] || null;
 
-  // コンバージョン（GA4 ページパス別集計）
-  document.getElementById('kpi-conv').textContent = fmt(m.conv);
-  document.getElementById('kpi-conv-sub').textContent = `GA4 · ${{label}}`;
+  // ── セッション
+  const sess     = ga4ts     ? sumSlice(ga4ts.sessions,     p) : m.sessions;
+  const sessPrev = ga4tsPrev ? sumSlice(ga4tsPrev.sessions, p) : 0;
+  document.getElementById('kpi-sessions').textContent       = fmt(sess);
+  document.getElementById('kpi-sessions-label').textContent = `セッション（${{p}}日）`;
+  document.getElementById('kpi-sessions-sub').textContent   = `GA4 · ${{label}}`;
+  setDelta('kpi-sessions-delta', 'kpi-sessions-prev', sess, sessPrev);
 
-  // クリック
-  document.getElementById('kpi-clicks').textContent = fmt(m.clicks);
-  document.getElementById('kpi-clicks-sub').textContent = `GSC · ${{label}} 平均順位 ${{m.pos}}位`;
+  // ── コンバージョン
+  const conv     = ga4ts     ? sumSlice(ga4ts.conv,     p) : m.conv;
+  const convPrev = ga4tsPrev ? sumSlice(ga4tsPrev.conv, p) : 0;
+  document.getElementById('kpi-conv').textContent       = fmt(conv);
+  document.getElementById('kpi-conv-label').textContent = `CV（${{p}}日）`;
+  document.getElementById('kpi-conv-sub').textContent   = `GA4 · ${{label}}`;
+  setDelta('kpi-conv-delta', 'kpi-conv-prev', conv, convPrev);
 
-  // インプレッション
-  document.getElementById('kpi-imps').textContent = fmt(m.imps);
-  document.getElementById('kpi-imps-sub').textContent = `GSC · ${{label}} CTR ${{m.ctr}}%`;
+  // ── クリック
+  const clicks     = gscTs     ? sumSlice(gscTs.clicks,     p) : m.clicks;
+  const clicksPrev = gscTsPrev ? sumSlice(gscTsPrev.clicks, p) : 0;
+  document.getElementById('kpi-clicks').textContent       = fmt(clicks);
+  document.getElementById('kpi-clicks-label').textContent = `クリック（${{p}}日）`;
+  document.getElementById('kpi-clicks-sub').textContent   = `GSC · ${{label}} 順位${{m.pos}}位`;
+  setDelta('kpi-clicks-delta', 'kpi-clicks-prev', clicks, clicksPrev);
 
-  // 記事数
-  document.getElementById('kpi-pub').textContent = fmt(m.pub);
+  // ── 表示回数
+  const imps     = gscTs     ? sumSlice(gscTs.imps,     p) : m.imps;
+  const impsPrev = gscTsPrev ? sumSlice(gscTsPrev.imps, p) : 0;
+  document.getElementById('kpi-imps').textContent       = fmt(imps);
+  document.getElementById('kpi-imps-label').textContent = `表示回数（${{p}}日）`;
+  document.getElementById('kpi-imps-sub').textContent   = `GSC · ${{label}} CTR${{m.ctr}}%`;
+  setDelta('kpi-imps-delta', 'kpi-imps-prev', imps, impsPrev);
+
+  // ── 記事数（比較なし）
+  document.getElementById('kpi-pub').textContent     = fmt(m.pub);
   document.getElementById('kpi-pub-sub').textContent = `draft ${{m.draft}}本 残`;
 
-  // 時系列グラフ更新
-  const ga4ts = GA4_TS[cat] || GA4_TS['all'];
-  const gscTs = GSC_TS[cat] || GSC_TS['all'];
+  // ── グラフ更新
+  const N = p;
+
   if (ga4ts && ga4ts.labels && ga4ts.labels.length) {{
-    chartSessions.data.labels = ga4ts.labels;
-    chartSessions.data.datasets[0].data = ga4ts.sessions;
+    const currLabels   = sliceLast(ga4ts.labels,   N);
+    const currSessions = sliceLast(ga4ts.sessions,  N);
+    const currConv     = sliceLast(ga4ts.conv,      N);
+
+    chartSessions.data.labels = currLabels;
+    chartSessions.data.datasets[0].data = currSessions;
+    chartSessions.data.datasets[0].label = `セッション（現在${{N}}日）`;
+    if (compareOn && ga4tsPrev && ga4tsPrev.sessions) {{
+      const prevSess = sliceLast(ga4tsPrev.sessions, N);
+      if (chartSessions.data.datasets.length < 2) {{
+        chartSessions.data.datasets.push({{
+          label: `前の${{N}}日`, data: prevSess,
+          borderColor: '#94a3b8', borderDash: [5, 5], backgroundColor: 'transparent',
+          fill: false, tension: 0.3, pointRadius: 1, order: 2
+        }});
+      }} else {{ chartSessions.data.datasets[1].data = prevSess; chartSessions.data.datasets[1].label = `前の${{N}}日`; }}
+    }} else {{ chartSessions.data.datasets.splice(1); }}
+    chartSessions.options.plugins.legend.display = compareOn && chartSessions.data.datasets.length > 1;
     chartSessions.update('none');
-    chartConv.data.labels = ga4ts.labels;
-    chartConv.data.datasets[0].data = ga4ts.conv;
+
+    chartConv.data.labels = currLabels;
+    chartConv.data.datasets[0].data = currConv;
+    chartConv.data.datasets[0].label = `CV（現在${{N}}日）`;
+    if (compareOn && ga4tsPrev && ga4tsPrev.conv) {{
+      const prevConv = sliceLast(ga4tsPrev.conv, N);
+      if (chartConv.data.datasets.length < 2) {{
+        chartConv.data.datasets.push({{
+          type: 'bar', label: `前の${{N}}日`, data: prevConv, backgroundColor: '#94a3b833', order: 2
+        }});
+      }} else {{ chartConv.data.datasets[1].data = prevConv; chartConv.data.datasets[1].label = `前の${{N}}日`; }}
+    }} else {{ chartConv.data.datasets.splice(1); }}
+    chartConv.options.plugins.legend.display = compareOn && chartConv.data.datasets.length > 1;
     chartConv.update('none');
   }}
+
   if (gscTs && gscTs.labels && gscTs.labels.length) {{
-    chartClicks.data.labels = gscTs.labels;
-    chartClicks.data.datasets[0].data = gscTs.clicks;
-    chartClicks.data.datasets[1].data = gscTs.imps.map(v => Math.round(v / 100));
+    const currLabels = sliceLast(gscTs.labels,  N);
+    const currClicks = sliceLast(gscTs.clicks,  N);
+    const currImps   = sliceLast(gscTs.imps,    N).map(v => Math.round(v / 100));
+
+    chartClicks.data.labels = currLabels;
+    chartClicks.data.datasets[0].data = currClicks;
+    chartClicks.data.datasets[0].label = `クリック（現在${{N}}日）`;
+    chartClicks.data.datasets[1].data = currImps;
+
+    if (compareOn && gscTsPrev && gscTsPrev.clicks) {{
+      const prevClicks = sliceLast(gscTsPrev.clicks, N);
+      if (chartClicks.data.datasets.length < 3) {{
+        chartClicks.data.datasets.push({{
+          label: `前の${{N}}日クリック`, data: prevClicks,
+          borderColor: '#fbbf2488', borderDash: [5, 5], tension: 0.3, pointRadius: 1, fill: false
+        }});
+      }} else {{ chartClicks.data.datasets[2].data = prevClicks; chartClicks.data.datasets[2].label = `前の${{N}}日クリック`; }}
+    }} else {{ chartClicks.data.datasets.splice(2); }}
+    chartClicks.options.plugins.legend.display = true;
     chartClicks.update('none');
   }}
 
-  // ドーナツチャートのハイライト
+  // ── ドーナツハイライト
   const catIdx = {{ all: -1, komon: 0, rosai: 1, kotsu: 2, other: 3 }}[cat];
   chartCpt.data.datasets[0].backgroundColor = cptColors.map((c, i) =>
     catIdx === -1 ? c : (i === catIdx ? c : c + '44')
@@ -1503,9 +1733,11 @@ if __name__ == "__main__":
     GA4_LIVE        = fetch_ga4(days=30)
     GA4_CAT_LIVE    = fetch_ga4_by_cat(days=30)
     GA4_TS_LIVE     = fetch_ga4_timeseries_cat(days=30)
+    GA4_TS_PREV     = fetch_ga4_timeseries_prev(days=30)
     GSC_LIVE        = fetch_gsc_daily(days=28)
     GSC_PAGES_LIVE  = fetch_gsc_pages(days=28, limit=20)
     GSC_TS_LIVE     = fetch_gsc_timeseries_cat(days=28)
+    GSC_TS_PREV     = fetch_gsc_timeseries_prev(days=28)
 
     # ── フォールバックデータ（APIが使えない場合） ──────────────
     GA4_DATA = GA4_LIVE or [
@@ -1619,7 +1851,8 @@ if __name__ == "__main__":
 
     print("⏳ HTML生成中...")
     html = generate_html(cpt_data, GA4_DATA, GSC_DAILY, GSC_PAGES, articles_data,
-                         GA4_CAT_LIVE, GA4_TS_LIVE, GSC_TS_LIVE)
+                         GA4_CAT_LIVE, GA4_TS_LIVE, GSC_TS_LIVE,
+                         GA4_TS_PREV, GSC_TS_PREV)
     out_path = Path(__file__).parent / "docs" / "index.html"
     out_path.parent.mkdir(exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
