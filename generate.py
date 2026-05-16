@@ -262,16 +262,16 @@ def fetch_gsc_timeseries_cat(days=28):
         return None
 
 
-def fetch_ga4_timeseries_prev(days=30):
-    """前期（同日数）の GA4 日付×ページパス別時系列を取得"""
+def fetch_ga4_ts_offset(days=30, offset_days=0, label=""):
+    """offset_days日前を終点とするdays日間のGA4時系列 by カテゴリ"""
     if not HAS_GOOGLE:
         return None
     try:
         creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/analytics.readonly"])
         creds.refresh(google.auth.transport.requests.Request())
         svc = build("analyticsdata", "v1beta", credentials=creds, cache_discovery=False)
-        end   = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
-        start = (date.today() - timedelta(days=days * 2 - 1)).strftime("%Y-%m-%d")
+        end   = (date.today() - timedelta(days=1 + offset_days)).strftime("%Y-%m-%d")
+        start = (date.today() - timedelta(days=days + offset_days)).strftime("%Y-%m-%d")
         resp = svc.properties().runReport(
             property="properties/316908797",
             body={
@@ -300,23 +300,25 @@ def fetch_ga4_timeseries_prev(days=30):
                 "sessions": [date_cat[d][cat]["s"]  for d in all_dates],
                 "conv":     [date_cat[d][cat]["cv"] for d in all_dates],
             }
-        print(f"  GA4 前期時系列 by cat: {len(all_dates)}日分 ({start}〜{end})")
+        lbl = label or f"offset={offset_days}d"
+        print(f"  GA4 時系列({lbl}): {len(all_dates)}日分 ({start}〜{end})")
         return result
     except Exception as e:
-        print(f"  GA4 前期時系列 エラー: {e}")
+        lbl = label or f"offset={offset_days}d"
+        print(f"  GA4 時系列({lbl}) エラー: {e}")
         return None
 
 
-def fetch_gsc_timeseries_prev(days=28):
-    """前期（同日数）の GSC 日付×ページ別クリック・表示回数を取得"""
+def fetch_gsc_ts_offset(days=28, offset_days=0, label=""):
+    """offset_days日前を終点とするdays日間のGSC時系列 by カテゴリ（GSCは2日ラグ）"""
     if not HAS_GOOGLE:
         return None
     try:
         creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
         creds.refresh(google.auth.transport.requests.Request())
         svc = build("searchconsole", "v1", credentials=creds, cache_discovery=False)
-        end   = (date.today() - timedelta(days=days + 2)).strftime("%Y-%m-%d")
-        start = (date.today() - timedelta(days=days * 2 + 1)).strftime("%Y-%m-%d")
+        end   = (date.today() - timedelta(days=2 + offset_days)).strftime("%Y-%m-%d")
+        start = (date.today() - timedelta(days=1 + days + offset_days)).strftime("%Y-%m-%d")
         resp = svc.searchanalytics().query(
             siteUrl="https://law-bright.com/",
             body={"startDate": start, "endDate": end,
@@ -340,10 +342,105 @@ def fetch_gsc_timeseries_prev(days=28):
                 "clicks": [date_cat[d][cat]["cl"] for d in all_dates],
                 "imps":   [date_cat[d][cat]["im"] for d in all_dates],
             }
-        print(f"  GSC 前期時系列 by cat: {len(all_dates)}日分 ({start}〜{end})")
+        lbl = label or f"offset={offset_days}d"
+        print(f"  GSC 時系列({lbl}): {len(all_dates)}日分 ({start}〜{end})")
         return result
     except Exception as e:
-        print(f"  GSC 前期時系列 エラー: {e}")
+        lbl = label or f"offset={offset_days}d"
+        print(f"  GSC 時系列({lbl}) エラー: {e}")
+        return None
+
+
+def fetch_ga4_monthly(months=36):
+    """直近N月の月次集計 by カテゴリ → {cat: {labels, sessions, conv}}"""
+    if not HAS_GOOGLE:
+        return None
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/analytics.readonly"])
+        creds.refresh(google.auth.transport.requests.Request())
+        svc = build("analyticsdata", "v1beta", credentials=creds, cache_discovery=False)
+        today = date.today()
+        # 今月1日から months-1 ヶ月前の1日まで
+        first_of_this = today.replace(day=1)
+        first_of_start = (first_of_this - timedelta(days=(months-1)*30)).replace(day=1)
+        end   = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+        start = first_of_start.strftime("%Y-%m-%d")
+        resp = svc.properties().runReport(
+            property="properties/316908797",
+            body={
+                "dateRanges": [{"startDate": start, "endDate": end}],
+                "dimensions": [{"name": "yearMonth"}, {"name": "pagePath"}],
+                "metrics": [{"name": "sessions"}, {"name": "conversions"}],
+                "limit": 100000,
+                "orderBys": [{"dimension": {"dimensionName": "yearMonth"}}],
+            }
+        ).execute()
+        month_cat = defaultdict(lambda: defaultdict(lambda: {"s": 0, "cv": 0}))
+        for row in resp.get("rows", []):
+            ym   = row["dimensionValues"][0]["value"]  # "202504"
+            path = row["dimensionValues"][1]["value"]
+            cat  = page_cat(f"https://law-bright.com{path}")
+            s    = int(row["metricValues"][0]["value"])
+            cv   = int(float(row["metricValues"][1]["value"]))
+            for c in ("all", cat):
+                month_cat[ym][c]["s"]  += s
+                month_cat[ym][c]["cv"] += cv
+        all_months = sorted(month_cat.keys())
+        result = {}
+        for cat in ["all", "komon", "rosai", "kotsu", "other"]:
+            result[cat] = {
+                "labels":   [f"{ym[:4]}/{ym[4:]}" for ym in all_months],
+                "sessions": [month_cat[ym][cat]["s"]  for ym in all_months],
+                "conv":     [month_cat[ym][cat]["cv"] for ym in all_months],
+            }
+        print(f"  GA4 月次集計: {len(all_months)}ヶ月分 ({start}〜{end})")
+        return result
+    except Exception as e:
+        print(f"  GA4 月次集計 エラー: {e}")
+        return None
+
+
+def fetch_gsc_monthly(months=16):
+    """直近N月の月次集計 by カテゴリ → {cat: {labels, clicks, imps}}"""
+    if not HAS_GOOGLE:
+        return None
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
+        creds.refresh(google.auth.transport.requests.Request())
+        svc = build("searchconsole", "v1", credentials=creds, cache_discovery=False)
+        today = date.today()
+        first_of_this = today.replace(day=1)
+        first_of_start = (first_of_this - timedelta(days=(months-1)*30)).replace(day=1)
+        end   = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+        start = first_of_start.strftime("%Y-%m-%d")
+        resp = svc.searchanalytics().query(
+            siteUrl="https://law-bright.com/",
+            body={"startDate": start, "endDate": end,
+                  "dimensions": ["date", "page"], "rowLimit": 25000}
+        ).execute()
+        month_cat = defaultdict(lambda: defaultdict(lambda: {"cl": 0, "im": 0}))
+        for row in resp.get("rows", []):
+            d   = row["keys"][0]  # "2026-04-17"
+            ym  = d[:7].replace("-", "")  # "202604"
+            url = row["keys"][1]
+            cat = page_cat(url)
+            cl  = int(row["clicks"])
+            im  = int(row["impressions"])
+            for c in ("all", cat):
+                month_cat[ym][c]["cl"] += cl
+                month_cat[ym][c]["im"] += im
+        all_months = sorted(month_cat.keys())
+        result = {}
+        for cat in ["all", "komon", "rosai", "kotsu", "other"]:
+            result[cat] = {
+                "labels": [f"{ym[:4]}/{ym[4:]}" for ym in all_months],
+                "clicks": [month_cat[ym][cat]["cl"] for ym in all_months],
+                "imps":   [month_cat[ym][cat]["im"] for ym in all_months],
+            }
+        print(f"  GSC 月次集計: {len(all_months)}ヶ月分 ({start}〜{end})")
+        return result
+    except Exception as e:
+        print(f"  GSC 月次集計 エラー: {e}")
         return None
 
 
@@ -752,7 +849,10 @@ def fetch_inquiry_data():
 
 def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, ga4_cat=None,
                   ga4_ts_cat=None, gsc_ts_cat=None, ga4_ts_prev=None, gsc_ts_prev=None,
-                  inquiry_data=None):
+                  inquiry_data=None,
+                  ga4_ts_1y=None, gsc_ts_1y=None,
+                  ga4_ts_2y=None, ga4_ts_3y=None,
+                  ga4_monthly=None, gsc_monthly=None):
     total_pub   = sum(c["publish"] for c in cpt_data)
     total_draft = sum(c["draft"]   for c in cpt_data)
 
@@ -913,8 +1013,10 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
   .am-filter-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
   .period-btn {{ transition: all .12s; }}
   .period-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
-  #compare-toggle {{ transition: all .12s; }}
-  #compare-toggle.compare-on {{ background: #7c3aed; color: white; border-color: #7c3aed; }}
+  .cmp-btn {{ transition: all .12s; }}
+  .cmp-btn.active {{ background: #7c3aed; color: white; border-color: #7c3aed; }}
+  #monthly-toggle {{ transition: all .12s; }}
+  #monthly-toggle.monthly-on {{ background: #9333ea; color: white; border-color: #9333ea; }}
   .kpi-delta {{ font-size: 0.7rem; font-weight: 700; }}
   .kpi-delta.up {{ color: #16a34a; }}
   .kpi-delta.dn {{ color: #dc2626; }}
@@ -959,7 +1061,15 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
     <button class="period-btn px-3 py-1 rounded-full text-xs font-semibold border border-gray-300 text-gray-600" onclick="setPeriod(14,this)">14日</button>
     <button class="period-btn active px-3 py-1 rounded-full text-xs font-semibold border border-gray-300 text-gray-600" onclick="setPeriod(30,this)">30日</button>
     <span class="text-gray-300 select-none">｜</span>
-    <button id="compare-toggle" class="px-3 py-1 rounded-full text-xs font-semibold border border-indigo-300 text-indigo-600" onclick="toggleCompare(this)">📊 前期比較</button>
+    <span class="text-xs text-gray-500">比較：</span>
+    <button class="cmp-btn active px-3 py-1 rounded-full text-xs font-semibold border border-gray-300 text-gray-600" onclick="setCompare('none',this)">なし</button>
+    <button class="cmp-btn px-3 py-1 rounded-full text-xs font-semibold border border-indigo-300 text-indigo-600" onclick="setCompare('prev',this)">前期</button>
+    <button class="cmp-btn px-3 py-1 rounded-full text-xs font-semibold border border-indigo-300 text-indigo-600" onclick="setCompare('month',this)">前月</button>
+    <button class="cmp-btn px-3 py-1 rounded-full text-xs font-semibold border border-indigo-300 text-indigo-600" onclick="setCompare('1y',this)">前年</button>
+    <button class="cmp-btn px-3 py-1 rounded-full text-xs font-semibold border border-indigo-300 text-indigo-600" onclick="setCompare('2y',this)">2年前</button>
+    <button class="cmp-btn px-3 py-1 rounded-full text-xs font-semibold border border-indigo-300 text-indigo-600" onclick="setCompare('3y',this)">3年前</button>
+    <span class="text-gray-300 select-none">｜</span>
+    <button id="monthly-toggle" class="px-3 py-1 rounded-full text-xs font-semibold border border-purple-300 text-purple-600" onclick="toggleMonthly(this)">📅 月次グラフ</button>
   </div>
 </div>
 
@@ -1388,6 +1498,12 @@ const GA4_TS      = {json.dumps(ga4_ts_cat  or {})};
 const GSC_TS      = {json.dumps(gsc_ts_cat  or {})};
 const GA4_TS_PREV = {json.dumps(ga4_ts_prev or {})};
 const GSC_TS_PREV = {json.dumps(gsc_ts_prev or {})};
+const GA4_TS_1Y   = {json.dumps(ga4_ts_1y  or {})};
+const GSC_TS_1Y   = {json.dumps(gsc_ts_1y  or {})};
+const GA4_TS_2Y   = {json.dumps(ga4_ts_2y  or {})};
+const GA4_TS_3Y   = {json.dumps(ga4_ts_3y  or {})};
+const GA4_MONTHLY = {json.dumps(ga4_monthly or {})};
+const GSC_MONTHLY = {json.dumps(gsc_monthly or {})};
 const INQ = {json.dumps(inquiry_data or {})};
 
 const CAT_COLORS = {{ all:'#6366f1', komon:'#10b981', rosai:'#ef4444', kotsu:'#f59e0b', other:'#64748b' }};
@@ -1434,7 +1550,9 @@ const chartCpt = new Chart(document.getElementById('chartCpt'), {{
 function fmt(n) {{ return Number(n).toLocaleString('ja-JP'); }}
 
 let selectedPeriod = 30;
-let compareOn = false;
+// 比較モード: 'none' | 'prev' | 'month' | '1y' | '2y' | '3y'
+let compareMode = 'none';
+let monthlyOn = false;
 
 function sliceLast(arr, n) {{
   if (!arr || !arr.length) return [];
@@ -1451,141 +1569,151 @@ function setPeriod(n, btn) {{
   updateKpiCards(currentFilter);
 }}
 
-function toggleCompare(btn) {{
-  compareOn = !compareOn;
-  btn.classList.toggle('compare-on', compareOn);
-  btn.textContent = compareOn ? '📊 前期比較 ON' : '📊 前期比較';
+function setCompare(mode, btn) {{
+  compareMode = mode;
+  document.querySelectorAll('.cmp-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
   document.querySelectorAll('.compare-info').forEach(el =>
-    el.classList.toggle('visible', compareOn)
-  );
+    el.classList.toggle('visible', mode !== 'none'));
   updateKpiCards(currentFilter);
 }}
 
-function setDelta(elId, prevElId, curr, prev) {{
-  const el = document.getElementById(elId);
-  const pe = document.getElementById(prevElId);
+function toggleMonthly(btn) {{
+  monthlyOn = !monthlyOn;
+  btn.classList.toggle('monthly-on', monthlyOn);
+  btn.textContent = monthlyOn ? '📅 月次グラフ ON' : '📅 月次グラフ';
+  updateCharts(currentFilter);
+}}
+
+// 比較モードに対応する prev データセットを返す
+function getPrevTs(cat) {{
+  const ga4ts = GA4_TS[cat] || GA4_TS['all'] || null;
+  const gscTs = GSC_TS[cat] || GSC_TS['all'] || null;
+  let ga4prev = null, gscPrev = null, label = '';
+  if (compareMode === 'prev') {{
+    ga4prev = GA4_TS_PREV[cat] || GA4_TS_PREV['all'];
+    gscPrev = GSC_TS_PREV[cat] || GSC_TS_PREV['all'];
+    label = '前期';
+  }} else if (compareMode === 'month') {{
+    const gm = GA4_MONTHLY[cat] || GA4_MONTHLY['all'];
+    const sm = GSC_MONTHLY[cat] || GSC_MONTHLY['all'];
+    if (gm && gm.labels.length >= 2) {{
+      const idx = gm.labels.length - 2;
+      ga4prev = {{ labels: [gm.labels[idx]], sessions: [gm.sessions[idx]], conv: [gm.conv[idx]] }};
+    }}
+    if (sm && sm.labels.length >= 2) {{
+      const idx = sm.labels.length - 2;
+      gscPrev = {{ labels: [sm.labels[idx]], clicks: [sm.clicks[idx]], imps: [sm.imps[idx]] }};
+    }}
+    label = '前月';
+  }} else if (compareMode === '1y') {{
+    ga4prev = GA4_TS_1Y[cat] || GA4_TS_1Y['all'];
+    gscPrev = GSC_TS_1Y[cat] || GSC_TS_1Y['all'];
+    label = '前年同期';
+  }} else if (compareMode === '2y') {{
+    ga4prev = GA4_TS_2Y[cat] || GA4_TS_2Y['all'];
+    label = '2年前同期';
+  }} else if (compareMode === '3y') {{
+    ga4prev = GA4_TS_3Y[cat] || GA4_TS_3Y['all'];
+    label = '3年前同期';
+  }}
+  return {{ ga4ts, gscTs, ga4prev, gscPrev, label }};
+}}
+
+function setDelta(id, curr, prev, label) {{
+  const el = document.getElementById('kpi-'+id+'-delta');
+  const pi = document.getElementById('kpi-'+id+'-prev');
   if (!el) return;
-  if (!compareOn || !prev) {{
+  if (compareMode === 'none' || prev == null || prev === 0) {{
     el.textContent = '';
     el.className = 'kpi-delta';
-    if (pe) pe.textContent = '';
+    if (pi) pi.textContent = '';
     return;
   }}
-  const d   = curr - prev;
-  const pct = prev > 0 ? (d / prev * 100) : 0;
-  const isPos = d >= 0;
-  el.textContent = (isPos ? '▲+' : '▼') + Math.abs(pct).toFixed(1) + '%';
-  el.className   = 'kpi-delta ' + (isPos ? 'up' : 'dn');
-  if (pe) pe.textContent = `前期: ${{fmt(prev)}}`;
+  const pct = ((curr - prev) / prev * 100).toFixed(1);
+  const sign = curr >= prev ? '▲' : '▼';
+  el.textContent = `${{sign}}${{Math.abs(pct)}}%`;
+  el.className = 'kpi-delta ' + (curr >= prev ? 'up' : 'dn');
+  if (pi) pi.textContent = `${{label}}: ${{fmt(prev)}}`;
 }}
 
 function updateKpiCards(cat) {{
   const m     = catMetrics[cat];
   const label = CAT_LABELS[cat];
   const p     = selectedPeriod;
+  const {{ ga4ts, gscTs, ga4prev, gscPrev, label: cmpLabel }} = getPrevTs(cat);
 
-  const ga4ts     = GA4_TS[cat]      || GA4_TS['all']      || null;
-  const ga4tsPrev = GA4_TS_PREV[cat] || GA4_TS_PREV['all'] || null;
-  const gscTs     = GSC_TS[cat]      || GSC_TS['all']      || null;
-  const gscTsPrev = GSC_TS_PREV[cat] || GSC_TS_PREV['all'] || null;
+  // ── 比較モードによる前期数値取得
+  let sessPrev = 0, convPrev = 0, clicksPrev = 0, impsPrev = 0;
+  if (compareMode === 'month') {{
+    // 月次比較: GA4_MONTHLY/GSC_MONTHLY の最後と最後から2番目を比較
+    const gm = GA4_MONTHLY[cat] || GA4_MONTHLY['all'];
+    const sm = GSC_MONTHLY[cat] || GSC_MONTHLY['all'];
+    if (gm && gm.labels.length >= 2) {{
+      sessPrev = gm.sessions[gm.sessions.length - 2] || 0;
+      convPrev = gm.conv[gm.conv.length - 2] || 0;
+    }}
+    if (sm && sm.labels.length >= 2) {{
+      clicksPrev = sm.clicks[sm.clicks.length - 2] || 0;
+      impsPrev   = sm.imps[sm.imps.length - 2] || 0;
+    }}
+  }} else if (compareMode !== 'none') {{
+    sessPrev   = ga4prev ? sumSlice(ga4prev.sessions, p) : 0;
+    convPrev   = ga4prev ? sumSlice(ga4prev.conv,     p) : 0;
+    clicksPrev = gscPrev ? sumSlice(gscPrev.clicks,   p) : 0;
+    impsPrev   = gscPrev ? sumSlice(gscPrev.imps,     p) : 0;
+  }}
 
   // ── セッション
-  const sess     = ga4ts     ? sumSlice(ga4ts.sessions,     p) : m.sessions;
-  const sessPrev = ga4tsPrev ? sumSlice(ga4tsPrev.sessions, p) : 0;
+  let sess = ga4ts ? sumSlice(ga4ts.sessions, p) : m.sessions;
+  if (compareMode === 'month') {{
+    const gm = GA4_MONTHLY[cat] || GA4_MONTHLY['all'];
+    if (gm && gm.sessions.length) sess = gm.sessions[gm.sessions.length - 1];
+  }}
   document.getElementById('kpi-sessions').textContent       = fmt(sess);
-  document.getElementById('kpi-sessions-label').textContent = `セッション（${{p}}日）`;
+  document.getElementById('kpi-sessions-label').textContent = `セッション（${{compareMode === 'month' ? '今月' : p+'日'}}）`;
   document.getElementById('kpi-sessions-sub').textContent   = `GA4 · ${{label}}`;
-  setDelta('kpi-sessions-delta', 'kpi-sessions-prev', sess, sessPrev);
+  setDelta('sessions', sess, sessPrev, cmpLabel);
 
   // ── コンバージョン
-  const conv     = ga4ts     ? sumSlice(ga4ts.conv,     p) : m.conv;
-  const convPrev = ga4tsPrev ? sumSlice(ga4tsPrev.conv, p) : 0;
+  let conv = ga4ts ? sumSlice(ga4ts.conv, p) : m.conv;
+  if (compareMode === 'month') {{
+    const gm = GA4_MONTHLY[cat] || GA4_MONTHLY['all'];
+    if (gm && gm.conv.length) conv = gm.conv[gm.conv.length - 1];
+  }}
   document.getElementById('kpi-conv').textContent       = fmt(conv);
-  document.getElementById('kpi-conv-label').textContent = `CV（${{p}}日）`;
+  document.getElementById('kpi-conv-label').textContent = `CV（${{compareMode === 'month' ? '今月' : p+'日'}}）`;
   document.getElementById('kpi-conv-sub').textContent   = `GA4 · ${{label}}`;
-  setDelta('kpi-conv-delta', 'kpi-conv-prev', conv, convPrev);
+  setDelta('conv', conv, convPrev, cmpLabel);
 
   // ── クリック
-  const clicks     = gscTs     ? sumSlice(gscTs.clicks,     p) : m.clicks;
-  const clicksPrev = gscTsPrev ? sumSlice(gscTsPrev.clicks, p) : 0;
+  let clicks = gscTs ? sumSlice(gscTs.clicks, p) : m.clicks;
+  if (compareMode === 'month') {{
+    const sm = GSC_MONTHLY[cat] || GSC_MONTHLY['all'];
+    if (sm && sm.clicks.length) clicks = sm.clicks[sm.clicks.length - 1];
+  }}
   document.getElementById('kpi-clicks').textContent       = fmt(clicks);
-  document.getElementById('kpi-clicks-label').textContent = `クリック（${{p}}日）`;
+  document.getElementById('kpi-clicks-label').textContent = `クリック（${{compareMode === 'month' ? '今月' : p+'日'}}）`;
   document.getElementById('kpi-clicks-sub').textContent   = `GSC · ${{label}} 順位${{m.pos}}位`;
-  setDelta('kpi-clicks-delta', 'kpi-clicks-prev', clicks, clicksPrev);
+  setDelta('clicks', clicks, clicksPrev, cmpLabel);
 
   // ── 表示回数
-  const imps     = gscTs     ? sumSlice(gscTs.imps,     p) : m.imps;
-  const impsPrev = gscTsPrev ? sumSlice(gscTsPrev.imps, p) : 0;
+  let imps = gscTs ? sumSlice(gscTs.imps, p) : m.imps;
+  if (compareMode === 'month') {{
+    const sm = GSC_MONTHLY[cat] || GSC_MONTHLY['all'];
+    if (sm && sm.imps.length) imps = sm.imps[sm.imps.length - 1];
+  }}
   document.getElementById('kpi-imps').textContent       = fmt(imps);
-  document.getElementById('kpi-imps-label').textContent = `表示回数（${{p}}日）`;
+  document.getElementById('kpi-imps-label').textContent = `表示回数（${{compareMode === 'month' ? '今月' : p+'日'}}）`;
   document.getElementById('kpi-imps-sub').textContent   = `GSC · ${{label}} CTR${{m.ctr}}%`;
-  setDelta('kpi-imps-delta', 'kpi-imps-prev', imps, impsPrev);
+  setDelta('imps', imps, impsPrev, cmpLabel);
 
   // ── 記事数（比較なし）
   document.getElementById('kpi-pub').textContent     = fmt(m.pub);
   document.getElementById('kpi-pub-sub').textContent = `draft ${{m.draft}}本 残`;
 
-  // ── グラフ更新
-  const N = p;
-
-  if (ga4ts && ga4ts.labels && ga4ts.labels.length) {{
-    const currLabels   = sliceLast(ga4ts.labels,   N);
-    const currSessions = sliceLast(ga4ts.sessions,  N);
-    const currConv     = sliceLast(ga4ts.conv,      N);
-
-    chartSessions.data.labels = currLabels;
-    chartSessions.data.datasets[0].data = currSessions;
-    chartSessions.data.datasets[0].label = `セッション（現在${{N}}日）`;
-    if (compareOn && ga4tsPrev && ga4tsPrev.sessions) {{
-      const prevSess = sliceLast(ga4tsPrev.sessions, N);
-      if (chartSessions.data.datasets.length < 2) {{
-        chartSessions.data.datasets.push({{
-          label: `前の${{N}}日`, data: prevSess,
-          borderColor: '#94a3b8', borderDash: [5, 5], backgroundColor: 'transparent',
-          fill: false, tension: 0.3, pointRadius: 1, order: 2
-        }});
-      }} else {{ chartSessions.data.datasets[1].data = prevSess; chartSessions.data.datasets[1].label = `前の${{N}}日`; }}
-    }} else {{ chartSessions.data.datasets.splice(1); }}
-    chartSessions.options.plugins.legend.display = compareOn && chartSessions.data.datasets.length > 1;
-    chartSessions.update('none');
-
-    chartConv.data.labels = currLabels;
-    chartConv.data.datasets[0].data = currConv;
-    chartConv.data.datasets[0].label = `CV（現在${{N}}日）`;
-    if (compareOn && ga4tsPrev && ga4tsPrev.conv) {{
-      const prevConv = sliceLast(ga4tsPrev.conv, N);
-      if (chartConv.data.datasets.length < 2) {{
-        chartConv.data.datasets.push({{
-          type: 'bar', label: `前の${{N}}日`, data: prevConv, backgroundColor: '#94a3b833', order: 2
-        }});
-      }} else {{ chartConv.data.datasets[1].data = prevConv; chartConv.data.datasets[1].label = `前の${{N}}日`; }}
-    }} else {{ chartConv.data.datasets.splice(1); }}
-    chartConv.options.plugins.legend.display = compareOn && chartConv.data.datasets.length > 1;
-    chartConv.update('none');
-  }}
-
-  if (gscTs && gscTs.labels && gscTs.labels.length) {{
-    const currLabels = sliceLast(gscTs.labels,  N);
-    const currClicks = sliceLast(gscTs.clicks,  N);
-    const currImps   = sliceLast(gscTs.imps,    N).map(v => Math.round(v / 100));
-
-    chartClicks.data.labels = currLabels;
-    chartClicks.data.datasets[0].data = currClicks;
-    chartClicks.data.datasets[0].label = `クリック（現在${{N}}日）`;
-    chartClicks.data.datasets[1].data = currImps;
-
-    if (compareOn && gscTsPrev && gscTsPrev.clicks) {{
-      const prevClicks = sliceLast(gscTsPrev.clicks, N);
-      if (chartClicks.data.datasets.length < 3) {{
-        chartClicks.data.datasets.push({{
-          label: `前の${{N}}日クリック`, data: prevClicks,
-          borderColor: '#fbbf2488', borderDash: [5, 5], tension: 0.3, pointRadius: 1, fill: false
-        }});
-      }} else {{ chartClicks.data.datasets[2].data = prevClicks; chartClicks.data.datasets[2].label = `前の${{N}}日クリック`; }}
-    }} else {{ chartClicks.data.datasets.splice(2); }}
-    chartClicks.options.plugins.legend.display = true;
-    chartClicks.update('none');
-  }}
+  // ── チャート更新
+  updateCharts(cat);
 
   // ── ドーナツハイライト
   const catIdx = {{ all: -1, komon: 0, rosai: 1, kotsu: 2, other: 3 }}[cat];
@@ -1596,6 +1724,141 @@ function updateKpiCards(cat) {{
     catIdx === -1 ? 1 : (i === catIdx ? 3 : 1)
   );
   chartCpt.update();
+}}
+
+function updateCharts(cat) {{
+  if (monthlyOn) {{
+    updateMonthlyCharts(cat);
+  }} else {{
+    updateDailyCharts(cat);
+  }}
+}}
+
+function updateMonthlyCharts(cat) {{
+  const gm = GA4_MONTHLY[cat] || GA4_MONTHLY['all'] || null;
+  const sm = GSC_MONTHLY[cat] || GSC_MONTHLY['all'] || null;
+  const n  = 12; // 最近12ヶ月
+
+  if (gm) {{
+    const labels   = sliceLast(gm.labels,   n);
+    const sessions = sliceLast(gm.sessions, n);
+    const conv     = sliceLast(gm.conv,     n);
+
+    chartSessions.config.type = 'bar';
+    chartSessions.data.labels = labels;
+    chartSessions.data.datasets = [{{
+      label: 'セッション', data: sessions,
+      backgroundColor: '#6366f180', borderColor: '#6366f1', borderWidth: 1
+    }}];
+    // 前年同月比（GA4_MONTHLY から -12ヶ月スライスで近似）
+    if (compareMode === '1y' && gm.sessions.length > n) {{
+      const prev12s = gm.sessions.slice(-(n * 2), -n);
+      if (prev12s.length > 0) {{
+        chartSessions.data.datasets.push({{
+          label: '前年', data: prev12s,
+          backgroundColor: '#6366f130', borderColor: '#6366f180', borderWidth: 1
+        }});
+      }}
+    }}
+    chartSessions.options.plugins.legend.display = chartSessions.data.datasets.length > 1;
+    chartSessions.update();
+
+    chartConv.config.type = 'bar';
+    chartConv.data.labels = labels;
+    chartConv.data.datasets = [{{ label: 'CV', data: conv, backgroundColor: '#10b981aa' }}];
+    chartConv.options.plugins.legend.display = false;
+    chartConv.update();
+  }}
+
+  if (sm) {{
+    const labels = sliceLast(sm.labels,  n);
+    const clicks = sliceLast(sm.clicks,  n);
+
+    chartClicks.config.type = 'bar';
+    chartClicks.data.labels = labels;
+    chartClicks.data.datasets = [{{
+      label: 'クリック', data: clicks,
+      backgroundColor: '#f59e0b80', borderColor: '#f59e0b', borderWidth: 1
+    }}];
+    chartClicks.options.plugins.legend.display = false;
+    chartClicks.update();
+  }}
+}}
+
+function updateDailyCharts(cat) {{
+  const N = selectedPeriod;
+  const {{ ga4ts, gscTs, ga4prev, gscPrev, label: cmpLabel }} = getPrevTs(cat);
+
+  if (ga4ts && ga4ts.labels && ga4ts.labels.length) {{
+    const currLabels   = sliceLast(ga4ts.labels,   N);
+    const currSessions = sliceLast(ga4ts.sessions,  N);
+    const currConv     = sliceLast(ga4ts.conv,      N);
+
+    chartSessions.config.type = 'line';
+    chartSessions.data.labels = currLabels;
+    chartSessions.data.datasets[0].data = currSessions;
+    chartSessions.data.datasets[0].label = `セッション（現在${{N}}日）`;
+    if (compareMode !== 'none' && ga4prev && ga4prev.sessions) {{
+      const prevSess = sliceLast(ga4prev.sessions, N);
+      if (chartSessions.data.datasets.length < 2) {{
+        chartSessions.data.datasets.push({{
+          label: cmpLabel, data: prevSess,
+          borderColor: '#94a3b8', borderDash: [5, 5], backgroundColor: 'transparent',
+          fill: false, tension: 0.3, pointRadius: 1, order: 2
+        }});
+      }} else {{
+        chartSessions.data.datasets[1].data  = prevSess;
+        chartSessions.data.datasets[1].label = cmpLabel;
+      }}
+    }} else {{ chartSessions.data.datasets.splice(1); }}
+    chartSessions.options.plugins.legend.display = compareMode !== 'none' && chartSessions.data.datasets.length > 1;
+    chartSessions.update('none');
+
+    chartConv.config.type = 'bar';
+    chartConv.data.labels = currLabels;
+    chartConv.data.datasets[0].data = currConv;
+    chartConv.data.datasets[0].label = `CV（現在${{N}}日）`;
+    if (compareMode !== 'none' && ga4prev && ga4prev.conv) {{
+      const prevConv = sliceLast(ga4prev.conv, N);
+      if (chartConv.data.datasets.length < 2) {{
+        chartConv.data.datasets.push({{
+          type: 'bar', label: cmpLabel, data: prevConv, backgroundColor: '#94a3b833', order: 2
+        }});
+      }} else {{
+        chartConv.data.datasets[1].data  = prevConv;
+        chartConv.data.datasets[1].label = cmpLabel;
+      }}
+    }} else {{ chartConv.data.datasets.splice(1); }}
+    chartConv.options.plugins.legend.display = compareMode !== 'none' && chartConv.data.datasets.length > 1;
+    chartConv.update('none');
+  }}
+
+  if (gscTs && gscTs.labels && gscTs.labels.length) {{
+    const currLabels = sliceLast(gscTs.labels,  N);
+    const currClicks = sliceLast(gscTs.clicks,  N);
+    const currImps   = sliceLast(gscTs.imps,    N).map(v => Math.round(v / 100));
+
+    chartClicks.config.type = 'line';
+    chartClicks.data.labels = currLabels;
+    chartClicks.data.datasets[0].data = currClicks;
+    chartClicks.data.datasets[0].label = `クリック（現在${{N}}日）`;
+    chartClicks.data.datasets[1].data = currImps;
+
+    if (compareMode !== 'none' && gscPrev && gscPrev.clicks) {{
+      const prevClicks = sliceLast(gscPrev.clicks, N);
+      if (chartClicks.data.datasets.length < 3) {{
+        chartClicks.data.datasets.push({{
+          label: `${{cmpLabel}}クリック`, data: prevClicks,
+          borderColor: '#fbbf2488', borderDash: [5, 5], tension: 0.3, pointRadius: 1, fill: false
+        }});
+      }} else {{
+        chartClicks.data.datasets[2].data  = prevClicks;
+        chartClicks.data.datasets[2].label = `${{cmpLabel}}クリック`;
+      }}
+    }} else {{ chartClicks.data.datasets.splice(2); }}
+    chartClicks.options.plugins.legend.display = true;
+    chartClicks.update('none');
+  }}
 }}
 
 // ── フィルター ──────────────────────────────────────
@@ -2165,11 +2428,17 @@ if __name__ == "__main__":
     GA4_LIVE        = fetch_ga4(days=30)
     GA4_CAT_LIVE    = fetch_ga4_by_cat(days=30)
     GA4_TS_LIVE     = fetch_ga4_timeseries_cat(days=30)
-    GA4_TS_PREV     = fetch_ga4_timeseries_prev(days=30)
+    GA4_TS_PREV     = fetch_ga4_ts_offset(days=30, offset_days=30, label="前期")
     GSC_LIVE        = fetch_gsc_daily(days=28)
     GSC_PAGES_LIVE  = fetch_gsc_pages(days=28, limit=20)
     GSC_TS_LIVE     = fetch_gsc_timeseries_cat(days=28)
-    GSC_TS_PREV     = fetch_gsc_timeseries_prev(days=28)
+    GSC_TS_PREV     = fetch_gsc_ts_offset(days=28, offset_days=28, label="前期")
+    GA4_TS_1Y       = fetch_ga4_ts_offset(days=30, offset_days=365, label="前年")
+    GSC_TS_1Y       = fetch_gsc_ts_offset(days=28, offset_days=365, label="前年")
+    GA4_TS_2Y       = fetch_ga4_ts_offset(days=30, offset_days=730, label="2年前")
+    GA4_TS_3Y       = fetch_ga4_ts_offset(days=30, offset_days=1095, label="3年前")
+    GA4_MONTHLY     = fetch_ga4_monthly(months=36)
+    GSC_MONTHLY     = fetch_gsc_monthly(months=16)
 
     # ── フォールバックデータ（APIが使えない場合） ──────────────
     GA4_DATA = GA4_LIVE or [
@@ -2289,7 +2558,10 @@ if __name__ == "__main__":
     html = generate_html(cpt_data, GA4_DATA, GSC_DAILY, GSC_PAGES, articles_data,
                          GA4_CAT_LIVE, GA4_TS_LIVE, GSC_TS_LIVE,
                          GA4_TS_PREV, GSC_TS_PREV,
-                         inquiry_data=inquiry_data)
+                         inquiry_data=inquiry_data,
+                         ga4_ts_1y=GA4_TS_1Y, gsc_ts_1y=GSC_TS_1Y,
+                         ga4_ts_2y=GA4_TS_2Y, ga4_ts_3y=GA4_TS_3Y,
+                         ga4_monthly=GA4_MONTHLY, gsc_monthly=GSC_MONTHLY)
     out_path = Path(__file__).parent / "docs" / "index.html"
     out_path.parent.mkdir(exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
