@@ -36,25 +36,22 @@ NOW = datetime.now(JST).strftime("%Y-%m-%d %H:%M JST")
 # ジャンル定義（cat = フィルターキー）
 CPTS = [
     # 企業法務
-    {"slug": "legaladvisor",  "label": "顧問弁護士",   "color": "#10b981", "cat": "komon"},
-    {"slug": "manda",         "label": "M&A",          "color": "#fbbf24", "cat": "komon"},
-    {"slug": "employee",      "label": "問題社員",     "color": "#ec4899", "cat": "komon"},
-    {"slug": "it",            "label": "IT法務",       "color": "#0ea5e9", "cat": "komon"},
-    {"slug": "realestate",    "label": "不動産",       "color": "#a78bfa", "cat": "komon"},
-    {"slug": "consultation",  "label": "相談事例",     "color": "#f97316", "cat": "komon"},
-    {"slug": "litigation",    "label": "訴訟",         "color": "#84cc16", "cat": "komon"},
-    {"slug": "dispute",       "label": "紛争解決",     "color": "#60a5fa", "cat": "komon"},
+    {"slug": "legaladvisor",   "label": "顧問弁護士",     "color": "#10b981", "cat": "komon"},
+    {"slug": "corporationlaw", "label": "企業法務ハブ",   "color": "#059669", "cat": "komon"},
+    {"slug": "manda",          "label": "M&A",            "color": "#fbbf24", "cat": "komon"},
+    {"slug": "employee",       "label": "問題社員",       "color": "#ec4899", "cat": "komon"},
+    {"slug": "bankruptcy",     "label": "倒産・破産",     "color": "#7c3aed", "cat": "komon"},
+    {"slug": "realestate",     "label": "不動産",         "color": "#a78bfa", "cat": "komon"},
     # 労災
-    {"slug": "labor-accident", "label": "労災",         "color": "#ef4444", "cat": "rosai"},
+    {"slug": "labor-accident", "label": "労災",           "color": "#ef4444", "cat": "rosai"},
     # 交通事故
-    {"slug": "kotuziko",      "label": "交通事故",     "color": "#f59e0b", "cat": "kotsu"},
+    {"slug": "kotuziko",       "label": "交通事故",       "color": "#f59e0b", "cat": "kotsu"},
     # その他
-    {"slug": "pages",         "label": "固定ページ",   "color": "#6366f1", "cat": "other"},
-    {"slug": "posts",         "label": "ブログ記事",   "color": "#8b5cf6", "cat": "other"},
-    {"slug": "glossary",      "label": "法律用語集",   "color": "#3b82f6", "cat": "other"},
-    {"slug": "download",      "label": "資料DL",       "color": "#14b8a6", "cat": "other"},
-    {"slug": "inheritance",   "label": "相続",         "color": "#fb7185", "cat": "other"},
-    {"slug": "debt",          "label": "債務整理",     "color": "#34d399", "cat": "other"},
+    {"slug": "pages",          "label": "固定ページ",     "color": "#6366f1", "cat": "other"},
+    {"slug": "posts",          "label": "ブログ記事",     "color": "#8b5cf6", "cat": "other"},
+    {"slug": "glossary",       "label": "法律用語集",     "color": "#3b82f6", "cat": "other"},
+    {"slug": "download",       "label": "資料DL",         "color": "#14b8a6", "cat": "other"},
+    {"slug": "inheritance",    "label": "相続",           "color": "#fb7185", "cat": "other"},
 ]
 
 # GSCページのジャンル判定
@@ -63,7 +60,8 @@ def page_cat(url: str) -> str:
         return "rosai"
     if "/kotuziko/" in url or "/kotsujiko/" in url:
         return "kotsu"
-    if "/corporationlaw/" in url or "/legaladvisor/" in url or "/komon/" in url:
+    if any(p in url for p in ["/corporationlaw/", "/legaladvisor/", "/komon/",
+                               "/manda/", "/employee/", "/bankruptcy/", "/realestate/"]):
         return "komon"
     return "other"
 

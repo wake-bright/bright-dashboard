@@ -39,7 +39,7 @@
     <div class="flex items-center gap-3 flex-wrap">
       <a href="https://law-bright.com" target="_blank" class="text-xs text-indigo-600 hover:underline">law-bright.com ↗</a>
       <a href="https://law-bright.com/wp-admin/" target="_blank" class="text-xs text-indigo-600 hover:underline">WP管理 ↗</a>
-      <span class="text-xs text-gray-400">更新: 2026-05-16 11:52 JST</span>
+      <span class="text-xs text-gray-400">更新: 2026-05-16 12:16 JST</span>
     </div>
   </div>
 </header>
@@ -77,8 +77,8 @@
     </div>
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
       <div class="text-xs text-gray-500 mb-1">公開記事数（WP）</div>
-      <div class="text-2xl font-bold text-gray-900" id="kpi-pub">862</div>
-      <div class="text-xs text-yellow-600 mt-1" id="kpi-pub-sub">draft 97本 残</div>
+      <div class="text-2xl font-bold text-gray-900" id="kpi-pub">1,051</div>
+      <div class="text-xs text-yellow-600 mt-1" id="kpi-pub-sub">draft 106本 残</div>
     </div>
   </div>
 
@@ -86,7 +86,7 @@
   <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5" id="cat-summary">
     <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 cat-summary-card" data-cat="komon">
       <div class="text-xs text-emerald-600 font-semibold mb-1">🏢 企業法務</div>
-      <div class="text-xl font-bold text-emerald-800">203<span class="text-sm font-normal text-emerald-600 ml-1">本</span></div>
+      <div class="text-xl font-bold text-emerald-800">392<span class="text-sm font-normal text-emerald-600 ml-1">本</span></div>
     </div>
     <div class="bg-red-50 border border-red-200 rounded-xl p-3 cat-summary-card" data-cat="rosai">
       <div class="text-xs text-red-600 font-semibold mb-1">⚠️ 労災</div>
@@ -161,6 +161,26 @@
         <tr class="cpt-expand-row" id="cpt-expand-row-kotuziko" data-cat="kotsu" data-open="false" style="display:none">
           <td colspan="6" class="px-0 py-0 border-l-4 border-indigo-400">
             <div id="cpt-expand-kotuziko" class="px-8 py-4 bg-indigo-50 text-xs"></div>
+          </td>
+        </tr>
+        <tr class="hover:bg-indigo-50 transition-colors cpt-row cursor-pointer select-none" data-cat="komon" onclick="toggleCptArticles('corporationlaw', this)">
+          <td class="px-4 py-3">
+            <span class="cpt-expand-icon text-gray-400 mr-2 inline-block w-3 text-xs transition-transform">▶</span>
+            <span class="font-medium text-gray-800">企業法務ハブ</span>
+          </td>
+          <td class="px-4 py-3"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-4 py-3 text-center">
+            <a href="https://law-bright.com/wp-admin/edit.php?post_type=corporationlaw&post_status=publish" target="_blank" onclick="event.stopPropagation()" class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full hover:bg-green-200 transition-colors" title="WP管理で公開記事を見る">178</a>
+          </td>
+          <td class="px-4 py-3 text-center">
+            <a href="https://law-bright.com/wp-admin/edit.php?post_type=corporationlaw&post_status=draft" target="_blank" onclick="event.stopPropagation()" class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full hover:bg-yellow-200 transition-colors" title="WP管理で下書きを見る">8</a>
+          </td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:96%;background:#059669"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">96%</td>
+        </tr>
+        <tr class="cpt-expand-row" id="cpt-expand-row-corporationlaw" data-cat="komon" data-open="false" style="display:none">
+          <td colspan="6" class="px-0 py-0 border-l-4 border-indigo-400">
+            <div id="cpt-expand-corporationlaw" class="px-8 py-4 bg-indigo-50 text-xs"></div>
           </td>
         </tr>
         <tr class="hover:bg-indigo-50 transition-colors cpt-row cursor-pointer select-none" data-cat="komon" onclick="toggleCptArticles('legaladvisor', this)">
@@ -343,6 +363,26 @@
             <div id="cpt-expand-posts" class="px-8 py-4 bg-indigo-50 text-xs"></div>
           </td>
         </tr>
+        <tr class="hover:bg-indigo-50 transition-colors cpt-row cursor-pointer select-none" data-cat="komon" onclick="toggleCptArticles('bankruptcy', this)">
+          <td class="px-4 py-3">
+            <span class="cpt-expand-icon text-gray-400 mr-2 inline-block w-3 text-xs transition-transform">▶</span>
+            <span class="font-medium text-gray-800">倒産・破産</span>
+          </td>
+          <td class="px-4 py-3"><span class="inline-block bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-1 rounded-full">企業法務</span></td>
+          <td class="px-4 py-3 text-center">
+            <a href="https://law-bright.com/wp-admin/edit.php?post_type=bankruptcy&post_status=publish" target="_blank" onclick="event.stopPropagation()" class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full hover:bg-green-200 transition-colors" title="WP管理で公開記事を見る">11</a>
+          </td>
+          <td class="px-4 py-3 text-center">
+            <a href="https://law-bright.com/wp-admin/edit.php?post_type=bankruptcy&post_status=draft" target="_blank" onclick="event.stopPropagation()" class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full hover:bg-yellow-200 transition-colors" title="WP管理で下書きを見る">1</a>
+          </td>
+          <td class="px-4 py-3 text-sm text-gray-600 w-40"><div class="w-full bg-gray-100 rounded-full h-2"><div class="h-2 rounded-full" style="width:92%;background:#7c3aed"></div></div></td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500">92%</td>
+        </tr>
+        <tr class="cpt-expand-row" id="cpt-expand-row-bankruptcy" data-cat="komon" data-open="false" style="display:none">
+          <td colspan="6" class="px-0 py-0 border-l-4 border-indigo-400">
+            <div id="cpt-expand-bankruptcy" class="px-8 py-4 bg-indigo-50 text-xs"></div>
+          </td>
+        </tr>
         <tr class="hover:bg-indigo-50 transition-colors cpt-row cursor-pointer select-none" data-cat="komon" onclick="toggleCptArticles('realestate', this)">
           <td class="px-4 py-3">
             <span class="cpt-expand-icon text-gray-400 mr-2 inline-block w-3 text-xs transition-transform">▶</span>
@@ -366,10 +406,10 @@
             <tfoot>
               <tr class="bg-indigo-50 font-bold">
                 <td class="px-4 py-3 text-indigo-800" colspan="2">合計</td>
-                <td class="px-4 py-3 text-center text-green-700" id="total-pub">862</td>
-                <td class="px-4 py-3 text-center text-yellow-700" id="total-draft">97</td>
+                <td class="px-4 py-3 text-center text-green-700" id="total-pub">1051</td>
+                <td class="px-4 py-3 text-center text-yellow-700" id="total-draft">106</td>
                 <td class="px-4 py-3"></td>
-                <td class="px-4 py-3 text-center text-indigo-700">90%</td>
+                <td class="px-4 py-3 text-center text-indigo-700">91%</td>
               </tr>
             </tfoot>
           </table>
@@ -912,7 +952,7 @@
   </div>
 </div>
 
-<footer class="text-center text-xs text-gray-400 py-6">弁護士法人ブライト 内部資料 · 外部公開禁止 · 更新: 2026-05-16 11:52 JST</footer>
+<footer class="text-center text-xs text-gray-400 py-6">弁護士法人ブライト 内部資料 · 外部公開禁止 · 更新: 2026-05-16 12:16 JST</footer>
 
 <script>
 // ── データ ──────────────────────────────────────────
@@ -923,7 +963,7 @@ const gscLabels   = ["04-18", "04-19", "04-20", "04-21", "04-22", "04-23", "04-2
 const gscClicks   = [135, 262, 363, 331, 342, 344, 209, 168, 249, 370, 232, 270, 342, 227, 150, 160, 162, 179, 311, 447, 312, 164, 373, 476, 429, 440, 452, 143];
 const gscImps     = [23775, 33809, 35177, 30340, 29632, 30726, 20412, 16122, 25293, 29351, 20768, 25881, 29738, 20850, 15371, 15494, 15551, 17288, 28181, 34809, 24490, 19283, 30135, 36912, 35767, 35453, 33888, 12862];
 const GA4_TOTAL   = 21907;
-const catMetrics  = {"all": {"clicks": 4319, "imps": 256191, "ctr": 1.69, "pos": 6.6, "pub": 862, "draft": 97}, "komon": {"clicks": 478, "imps": 15104, "ctr": 3.16, "pos": 6.7, "pub": 203, "draft": 49}, "rosai": {"clicks": 3250, "imps": 214987, "ctr": 1.51, "pos": 6.5, "pub": 94, "draft": 0}, "kotsu": {"clicks": 193, "imps": 9764, "ctr": 1.98, "pos": 9.9, "pub": 261, "draft": 1}, "other": {"clicks": 398, "imps": 16336, "ctr": 2.44, "pos": 6.2, "pub": 304, "draft": 47}};
+const catMetrics  = {"all": {"clicks": 4319, "imps": 256191, "ctr": 1.69, "pos": 6.6, "pub": 1051, "draft": 106}, "komon": {"clicks": 478, "imps": 15104, "ctr": 3.16, "pos": 6.7, "pub": 392, "draft": 58}, "rosai": {"clicks": 3250, "imps": 214987, "ctr": 1.51, "pos": 6.5, "pub": 94, "draft": 0}, "kotsu": {"clicks": 193, "imps": 9764, "ctr": 1.98, "pos": 9.9, "pub": 261, "draft": 1}, "other": {"clicks": 398, "imps": 16336, "ctr": 2.44, "pos": 6.2, "pub": 304, "draft": 47}};
 
 const CAT_COLORS = { all:'#6366f1', komon:'#10b981', rosai:'#ef4444', kotsu:'#f59e0b', other:'#64748b' };
 const CAT_LABELS = { all:'全ジャンル', komon:'企業法務', rosai:'労災', kotsu:'交通事故', other:'その他' };
@@ -954,7 +994,7 @@ const chartClicks = new Chart(document.getElementById('chartClicks'), {
   ] },
   options: { responsive: true, plugins: { legend: { display: true, labels: { font: { size: 10 } } }, tooltip: { mode: 'index', intersect: false } }, scales: { x: { ticks: { maxRotation: 45, font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } } }
 });
-const cptData = [203, 94, 261, 304];
+const cptData = [392, 94, 261, 304];
 const cptColors = ['#10b981','#ef4444','#f59e0b','#64748b'];
 const chartCpt = new Chart(document.getElementById('chartCpt'), {
   type: 'doughnut',
