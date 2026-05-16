@@ -606,11 +606,11 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
       <div class="text-xs text-indigo-600 mt-1" id="kpi-clicks-sub">GSC · 平均順位 {gsc_avg_pos}位</div>
     </div>
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
-      <div class="text-xs text-gray-500 mb-1">インプレッション（28日）</div>
+      <div class="text-xs text-gray-500 mb-1">表示回数（28日）</div>
       <div class="text-2xl font-bold text-gray-900" id="kpi-imps">{gsc_total_imps:,}</div>
       <div class="text-xs text-indigo-600 mt-1" id="kpi-imps-sub">GSC · CTR {gsc_avg_ctr}%</div>
     </div>
-    <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+    <div class="kpi-card col-span-2 md:col-span-1 bg-white rounded-xl shadow-sm p-4 border border-gray-100">
       <div class="text-xs text-gray-500 mb-1">公開記事数（WP）</div>
       <div class="text-2xl font-bold text-gray-900" id="kpi-pub">{total_pub:,}</div>
       <div class="text-xs text-yellow-600 mt-1" id="kpi-pub-sub">draft {total_draft}本 残</div>
