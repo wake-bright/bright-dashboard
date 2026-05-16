@@ -1,15 +1,28 @@
 #!/usr/bin/env python3
 """
 bright-dashboard/generate.py
-WP REST API + 事前取得データ → docs/index.html を生成
+WP REST API + GA4 + GSC → docs/index.html を自動生成
 実行: python3 generate.py
+cron: 毎朝7時に自動実行（~/bright-dashboard/update.sh）
 """
 import json
 import os
+import sys
+import subprocess
 import requests
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 from pathlib import Path
 from dotenv import dotenv_values
+
+# GA4/GSC API（google-auth使用）
+try:
+    from google.oauth2 import service_account
+    import google.auth
+    import google.auth.transport.requests
+    from googleapiclient.discovery import build
+    HAS_GOOGLE = True
+except ImportError:
+    HAS_GOOGLE = False
 
 ENV = dotenv_values(os.path.expanduser("~/bright-eyecatch/.env"))
 WP_BASE = ENV.get("WP_BASE_URL", "https://law-bright.com")
@@ -94,6 +107,90 @@ def fetch_cpt_counts():
         except Exception:
             pass
         results.append({**cpt, "publish": pub, "draft": draft, "total": pub + draft})
+    return results
+
+
+def fetch_ga4(days=30):
+    """GA4 APIから日次セッション・CV数を取得（google ADC使用）"""
+    if not HAS_GOOGLE:
+        return None
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/analytics.readonly"])
+        creds.refresh(google.auth.transport.requests.Request())
+        svc = build("analyticsdata", "v1beta", credentials=creds, cache_discovery=False)
+        end = date.today().strftime("%Y-%m-%d")
+        start = (date.today() - timedelta(days=days-1)).strftime("%Y-%m-%d")
+        resp = svc.properties().runReport(
+            property=f"properties/316908797",
+            body={
+                "dateRanges": [{"startDate": start, "endDate": end}],
+                "dimensions": [{"name": "date"}],
+                "metrics": [{"name": "sessions"}, {"name": "activeUsers"}, {"name": "conversions"}],
+                "orderBys": [{"dimension": {"dimensionName": "date"}}],
+            }
+        ).execute()
+        rows = []
+        for row in resp.get("rows", []):
+            d = row["dimensionValues"][0]["value"]
+            m = row["metricValues"]
+            rows.append({"date": d, "sessions": m[0]["value"], "activeUsers": m[1]["value"], "conversions": m[2]["value"]})
+        print(f"  GA4: {len(rows)}日分取得")
+        return rows
+    except Exception as e:
+        print(f"  GA4 API エラー（フォールバック使用）: {e}")
+        return None
+
+
+def fetch_gsc_daily(days=28):
+    """GSC APIから日次クリック・表示回数を取得"""
+    if not HAS_GOOGLE:
+        return None
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
+        creds.refresh(google.auth.transport.requests.Request())
+        svc = build("searchconsole", "v1", credentials=creds, cache_discovery=False)
+        end = (date.today() - timedelta(days=2)).strftime("%Y-%m-%d")
+        start = (date.today() - timedelta(days=days+1)).strftime("%Y-%m-%d")
+        resp = svc.searchanalytics().query(
+            siteUrl="https://law-bright.com/",
+            body={"startDate": start, "endDate": end, "dimensions": ["date"],
+                  "rowLimit": days, "orderBy": [{"fieldName": "date"}]}
+        ).execute()
+        rows = []
+        for row in resp.get("rows", []):
+            rows.append({"date": row["keys"][0], "clicks": int(row["clicks"]),
+                         "impressions": int(row["impressions"]), "ctr": row["ctr"], "position": row["position"]})
+        print(f"  GSC日次: {len(rows)}日分取得")
+        return rows
+    except Exception as e:
+        print(f"  GSC日次 APIエラー（フォールバック使用）: {e}")
+        return None
+
+
+def fetch_gsc_pages(days=28, limit=20):
+    """GSC APIからページ別クリック数上位を取得"""
+    if not HAS_GOOGLE:
+        return None
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
+        creds.refresh(google.auth.transport.requests.Request())
+        svc = build("searchconsole", "v1", credentials=creds, cache_discovery=False)
+        end = (date.today() - timedelta(days=2)).strftime("%Y-%m-%d")
+        start = (date.today() - timedelta(days=days+1)).strftime("%Y-%m-%d")
+        resp = svc.searchanalytics().query(
+            siteUrl="https://law-bright.com/",
+            body={"startDate": start, "endDate": end, "dimensions": ["page"],
+                  "rowLimit": limit, "orderBy": [{"fieldName": "clicks", "sortOrder": "DESCENDING"}]}
+        ).execute()
+        rows = []
+        for row in resp.get("rows", []):
+            rows.append({"page": row["keys"][0], "clicks": int(row["clicks"]),
+                         "impressions": int(row["impressions"]), "ctr": row["ctr"], "position": row["position"]})
+        print(f"  GSCページ: {len(rows)}件取得")
+        return rows
+    except Exception as e:
+        print(f"  GSCページ APIエラー（フォールバック使用）: {e}")
+        return None
     return results
 
 
@@ -316,11 +413,12 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
   <!-- タブ -->
   <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
     <div class="border-b border-gray-200 flex overflow-x-auto">
-      <button class="tab-btn active px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('kpi')">📊 KPI</button>
-      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('articles')">📝 記事ステータス</button>
-      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('pages')">🏆 上位ページ</button>
-      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('tasks')">✅ タスク</button>
-      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('info')">ℹ️ 基本情報</button>
+      <button class="tab-btn active px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('kpi',this)">📊 KPI</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('articles',this)">📝 記事ステータス</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('pages',this)">🏆 上位ページ</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('tasks',this)">✅ タスク</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('info',this)">ℹ️ 基本情報</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('sitemap',this)">🗺️ サイトマップ</button>
     </div>
 
     <!-- KPIタブ -->
@@ -407,6 +505,57 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
               </tr>
             </thead>
             <tbody id="tasks-tbody" class="divide-y divide-gray-100">{task_rows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- サイトマップタブ -->
+    <div id="tab-sitemap" class="tab-content">
+      <div class="p-5">
+        <div class="flex items-center gap-3 mb-4 flex-wrap">
+          <button id="sm-loadBtn"
+            class="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed"
+            onclick="smLoadSitemap()">サイトマップを取得</button>
+          <span class="text-xs text-gray-400" id="sm-lastChecked"></span>
+        </div>
+        <div id="sm-status" class="text-sm text-gray-600 mb-2 min-h-[20px]"></div>
+        <div class="w-full h-1 bg-gray-100 rounded mb-4 overflow-hidden"><div id="sm-progressFill" class="h-full bg-indigo-500 rounded transition-all" style="width:0%"></div></div>
+
+        <div id="sm-summary" class="grid grid-cols-3 gap-4 mb-4 hidden">
+          <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+            <div class="text-xs text-gray-500 mb-1">サブサイトマップ数</div>
+            <div class="text-2xl font-bold text-indigo-600" id="sm-sumCount">-</div>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+            <div class="text-xs text-gray-500 mb-1">総URL数</div>
+            <div class="text-2xl font-bold text-indigo-600" id="sm-sumUrls">-</div>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+            <div class="text-xs text-gray-500 mb-1">最終更新</div>
+            <div class="text-lg font-bold text-indigo-600 pt-1" id="sm-sumLatest">-</div>
+          </div>
+        </div>
+
+        <div id="sm-filterBar" class="flex items-center gap-3 mb-3 hidden">
+          <input type="text" id="sm-filterInput"
+            class="border border-gray-200 rounded-lg px-3 py-2 text-sm w-64 focus:outline-none focus:border-indigo-400"
+            placeholder="サイトマップ名で絞り込み..." oninput="smFilterTable()">
+          <span id="sm-filteredCount" class="text-xs text-gray-500"></span>
+        </div>
+
+        <div class="overflow-x-auto hidden" id="sm-tableWrap">
+          <table class="w-full text-sm bg-white rounded-xl shadow-sm overflow-hidden">
+            <thead>
+              <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                <th class="px-3 py-3 text-center cursor-pointer hover:bg-gray-100 select-none" onclick="smSortTable(0)">#</th>
+                <th class="px-3 py-3 text-left cursor-pointer hover:bg-gray-100 select-none" onclick="smSortTable(1)">サイトマップ</th>
+                <th class="px-3 py-3 text-center cursor-pointer hover:bg-gray-100 select-none" onclick="smSortTable(2)">URL数</th>
+                <th class="px-3 py-3 text-center cursor-pointer hover:bg-gray-100 select-none" onclick="smSortTable(3)">最終更新</th>
+                <th class="px-3 py-3 text-center">操作</th>
+              </tr>
+            </thead>
+            <tbody id="sm-tableBody" class="divide-y divide-gray-100"></tbody>
           </table>
         </div>
       </div>
@@ -585,11 +734,164 @@ function applyFilter() {{
   }});
 }}
 
-function switchTab(name) {{
+function switchTab(name, btn) {{
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
-  event.currentTarget.classList.add('active');
+  if (btn) btn.classList.add('active');
+  applyFilter();  // タブ切替時にも現在のフィルターを再適用
+}}
+
+// ── サイトマップビューア（西田紗知さん作成） ──────────────────────────
+const SM_SITEMAP_INDEX = 'https://law-bright.com/sitemap.xml';
+const SM_PROXIES = [
+  url => `https://api.allorigins.win/raw?url=${{encodeURIComponent(url)}}`,
+  url => `https://corsproxy.io/?${{encodeURIComponent(url)}}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${{encodeURIComponent(url)}}`,
+];
+let smAllRows = [];
+let smSortCol = -1, smSortAsc = true;
+
+function smSetStatus(msg, type='') {{
+  const el = document.getElementById('sm-status');
+  el.textContent = msg;
+  el.style.color = type === 'err' ? '#dc2626' : type === 'ok' ? '#16a34a' : '#4a5568';
+}}
+
+function smSetProgress(pct) {{
+  document.getElementById('sm-progressFill').style.width = pct + '%';
+}}
+
+async function smFetchXML(url) {{
+  let lastErr;
+  for (const proxy of SM_PROXIES) {{
+    try {{
+      const res = await fetch(proxy(url), {{ signal: AbortSignal.timeout(8000) }});
+      if (!res.ok) throw new Error(`HTTP ${{res.status}}`);
+      const text = await res.text();
+      if (!text.trim().startsWith('<')) throw new Error('XMLではないレスポンス');
+      return new DOMParser().parseFromString(text, 'text/xml');
+    }} catch (e) {{ lastErr = e; }}
+  }}
+  throw lastErr;
+}}
+
+function smFormatDate(str) {{
+  if (!str) return '-';
+  try {{
+    const d = new Date(str);
+    return d.toLocaleDateString('ja-JP', {{year:'numeric',month:'2-digit',day:'2-digit'}})
+      + ' ' + d.toLocaleTimeString('ja-JP', {{hour:'2-digit',minute:'2-digit'}});
+  }} catch {{ return str; }}
+}}
+
+async function smLoadSitemap() {{
+  const btn = document.getElementById('sm-loadBtn');
+  btn.disabled = true;
+  document.getElementById('sm-tableWrap').classList.add('hidden');
+  document.getElementById('sm-summary').classList.add('hidden');
+  document.getElementById('sm-filterBar').classList.add('hidden');
+  smSetProgress(5);
+  smSetStatus('sitemap.xml を取得中...');
+
+  try {{
+    const indexDoc = await smFetchXML(SM_SITEMAP_INDEX);
+    const sitemaps = [...indexDoc.querySelectorAll('sitemap')];
+    smSetProgress(15);
+    smSetStatus(`${{sitemaps.length}} 件のサブサイトマップを確認。URL数を取得中...`);
+
+    smAllRows = [];
+    let totalUrls = 0;
+    let latestDate = '';
+
+    for (let i = 0; i < sitemaps.length; i++) {{
+      const locEl = sitemaps[i].querySelector('loc');
+      const lastmodEl = sitemaps[i].querySelector('lastmod');
+      if (!locEl) continue;
+      const url = locEl.textContent.trim();
+      const lastmod = lastmodEl ? lastmodEl.textContent.trim() : '';
+      const name = url.replace('https://law-bright.com/', '').replace('.xml', '');
+
+      let count = '-';
+      try {{
+        const subDoc = await smFetchXML(url);
+        const urls = subDoc.querySelectorAll('url');
+        count = urls.length;
+        totalUrls += count;
+      }} catch (e) {{ count = 'エラー'; }}
+
+      if (lastmod && lastmod > latestDate) latestDate = lastmod;
+      smAllRows.push({{ url, name, count, lastmod }});
+      smSetProgress(15 + Math.round((i + 1) / sitemaps.length * 80));
+      smSetStatus(`取得中... (${{i + 1}}/${{sitemaps.length}}) ${{name}}`);
+      smRenderTable(smAllRows);
+    }}
+
+    document.getElementById('sm-sumCount').textContent = smAllRows.length;
+    document.getElementById('sm-sumUrls').textContent = totalUrls.toLocaleString();
+    document.getElementById('sm-sumLatest').textContent = smFormatDate(latestDate).split(' ')[0];
+    document.getElementById('sm-summary').classList.remove('hidden');
+    document.getElementById('sm-filterBar').classList.remove('hidden');
+    document.getElementById('sm-filteredCount').textContent = `${{smAllRows.length}} 件`;
+    document.getElementById('sm-lastChecked').textContent = '最終取得: ' + new Date().toLocaleString('ja-JP');
+    smSetProgress(100);
+    smSetStatus(`完了 — ${{smAllRows.length}} サイトマップ、合計 ${{totalUrls.toLocaleString()}} URL`, 'ok');
+  }} catch (e) {{
+    smSetStatus('取得エラー: ' + e.message, 'err');
+    console.error(e);
+  }}
+
+  btn.disabled = false;
+  setTimeout(() => smSetProgress(0), 1000);
+}}
+
+function smRenderTable(rows) {{
+  const tbody = document.getElementById('sm-tableBody');
+  const filter = (document.getElementById('sm-filterInput')?.value || '').toLowerCase();
+  const filtered = filter ? rows.filter(r => r.name.toLowerCase().includes(filter)) : rows;
+
+  tbody.innerHTML = filtered.map((r, i) => `
+    <tr class="hover:bg-gray-50 transition-colors">
+      <td class="px-3 py-2 text-center text-gray-400 text-xs">${{i + 1}}</td>
+      <td class="px-3 py-2">
+        <a href="${{r.url}}" target="_blank" class="text-blue-700 font-mono text-xs hover:underline">${{r.name}}</a>
+        ${{r.name.includes('cat') ? '<span class="inline-block ml-1 px-1 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded">カテゴリ</span>' : ''}}
+        ${{r.name === 'addl-sitemap' ? '<span class="inline-block ml-1 px-1 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded">追加</span>' : ''}}
+      </td>
+      <td class="px-3 py-2 text-center">
+        ${{typeof r.count === 'number'
+          ? `<span class="inline-block bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded-full">${{r.count.toLocaleString()}} URLs</span>`
+          : `<span class="text-red-600 text-xs">${{r.count}}</span>`}}
+      </td>
+      <td class="px-3 py-2 text-center text-gray-500 text-xs">${{smFormatDate(r.lastmod)}}</td>
+      <td class="px-3 py-2 text-center">
+        <button class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 px-2 py-1 rounded text-xs cursor-pointer transition-colors"
+          onclick="window.open('${{r.url}}','_blank')">開く</button>
+      </td>
+    </tr>
+  `).join('');
+
+  document.getElementById('sm-tableWrap').classList.remove('hidden');
+  const fc = document.getElementById('sm-filteredCount');
+  if (fc) fc.textContent = `${{filtered.length}} 件`;
+}}
+
+function smFilterTable() {{ smRenderTable(smAllRows); }}
+
+function smSortTable(col) {{
+  if (smSortCol === col) smSortAsc = !smSortAsc;
+  else {{ smSortCol = col; smSortAsc = true; }}
+  smAllRows.sort((a, b) => {{
+    if (col === 0) return 0;
+    let va, vb;
+    if (col === 1) {{ va = a.name; vb = b.name; }}
+    else if (col === 2) {{ va = typeof a.count === 'number' ? a.count : -1; vb = typeof b.count === 'number' ? b.count : -1; }}
+    else if (col === 3) {{ va = a.lastmod || ''; vb = b.lastmod || ''; }}
+    if (va < vb) return smSortAsc ? -1 : 1;
+    if (va > vb) return smSortAsc ? 1 : -1;
+    return 0;
+  }});
+  smRenderTable(smAllRows);
 }}
 </script>
 </body>
@@ -604,7 +906,14 @@ if __name__ == "__main__":
         if c["total"] > 0:
             print(f"  [{c['cat']:6s}] {c['label']:12s}: publish={c['publish']:4d} draft={c['draft']:4d}")
 
-    GA4_DATA = [
+    # GA4/GSC: APIから取得 → 失敗時はフォールバックデータを使用
+    print("⏳ GA4/GSCデータを取得中...")
+    GA4_LIVE  = fetch_ga4(days=30)
+    GSC_LIVE  = fetch_gsc_daily(days=28)
+    GSC_PAGES_LIVE = fetch_gsc_pages(days=28, limit=20)
+
+    # ── フォールバックデータ（APIが使えない場合） ──────────────
+    GA4_DATA = GA4_LIVE or [
         {"date":"20260416","sessions":"738","activeUsers":"634","conversions":"3"},
         {"date":"20260417","sessions":"744","activeUsers":"639","conversions":"6"},
         {"date":"20260418","sessions":"300","activeUsers":"267","conversions":"5"},
@@ -636,7 +945,7 @@ if __name__ == "__main__":
         {"date":"20260514","sessions":"1216","activeUsers":"1062","conversions":"20"},
         {"date":"20260515","sessions":"1137","activeUsers":"986","conversions":"5"},
     ]
-    GSC_DAILY = [
+    GSC_DAILY_FALLBACK = [
         {"date":"2026-04-18","clicks":135,"impressions":23775,"ctr":0.0057,"position":6.2},
         {"date":"2026-04-19","clicks":262,"impressions":33809,"ctr":0.0077,"position":6.2},
         {"date":"2026-04-20","clicks":363,"impressions":35177,"ctr":0.0103,"position":7.2},
@@ -666,7 +975,7 @@ if __name__ == "__main__":
         {"date":"2026-05-14","clicks":452,"impressions":33888,"ctr":0.0133,"position":8.7},
         {"date":"2026-05-15","clicks":143,"impressions":12862,"ctr":0.0111,"position":9.3},
     ]
-    GSC_PAGES = [
+    GSC_PAGES_FALLBACK = [
         {"page":"https://law-bright.com/labor-accident/knowledge/form8/","clicks":634,"impressions":41391,"ctr":0.0153,"position":6.5},
         {"page":"https://law-bright.com/labor-accident/knowledge/form5/","clicks":545,"impressions":62107,"ctr":0.0088,"position":6.6},
         {"page":"https://law-bright.com/labor-accident/knowledge/tenosynovitis-workers-comp/","clicks":387,"impressions":8412,"ctr":0.046,"position":4.6},
@@ -688,6 +997,9 @@ if __name__ == "__main__":
         {"page":"https://law-bright.com/kotuziko/knowledge/kotsujiko_kizu/","clicks":91,"impressions":4008,"ctr":0.0227,"position":8.1},
         {"page":"https://law-bright.com/corporationlaw/contents/saiken/hotel-cancellation-fee-unpaid/","clicks":82,"impressions":6025,"ctr":0.0136,"position":7.9},
     ]
+
+    GSC_DAILY  = GSC_LIVE  or GSC_DAILY_FALLBACK
+    GSC_PAGES  = GSC_PAGES_LIVE or GSC_PAGES_FALLBACK
 
     print("⏳ HTML生成中...")
     html = generate_html(cpt_data, GA4_DATA, GSC_DAILY, GSC_PAGES)

@@ -39,7 +39,7 @@
     <div class="flex items-center gap-3 flex-wrap">
       <a href="https://law-bright.com" target="_blank" class="text-xs text-indigo-600 hover:underline">law-bright.com ↗</a>
       <a href="https://law-bright.com/wp-admin/" target="_blank" class="text-xs text-indigo-600 hover:underline">WP管理 ↗</a>
-      <span class="text-xs text-gray-400">更新: 2026-05-16 10:01 JST</span>
+      <span class="text-xs text-gray-400">更新: 2026-05-16 10:43 JST</span>
     </div>
   </div>
 </header>
@@ -105,11 +105,12 @@
   <!-- タブ -->
   <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
     <div class="border-b border-gray-200 flex overflow-x-auto">
-      <button class="tab-btn active px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('kpi')">📊 KPI</button>
-      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('articles')">📝 記事ステータス</button>
-      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('pages')">🏆 上位ページ</button>
-      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('tasks')">✅ タスク</button>
-      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('info')">ℹ️ 基本情報</button>
+      <button class="tab-btn active px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('kpi',this)">📊 KPI</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('articles',this)">📝 記事ステータス</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('pages',this)">🏆 上位ページ</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('tasks',this)">✅ タスク</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('info',this)">ℹ️ 基本情報</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('sitemap',this)">🗺️ サイトマップ</button>
     </div>
 
     <!-- KPIタブ -->
@@ -521,6 +522,57 @@
       </div>
     </div>
 
+    <!-- サイトマップタブ -->
+    <div id="tab-sitemap" class="tab-content">
+      <div class="p-5">
+        <div class="flex items-center gap-3 mb-4 flex-wrap">
+          <button id="sm-loadBtn"
+            class="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed"
+            onclick="smLoadSitemap()">サイトマップを取得</button>
+          <span class="text-xs text-gray-400" id="sm-lastChecked"></span>
+        </div>
+        <div id="sm-status" class="text-sm text-gray-600 mb-2 min-h-[20px]"></div>
+        <div class="w-full h-1 bg-gray-100 rounded mb-4 overflow-hidden"><div id="sm-progressFill" class="h-full bg-indigo-500 rounded transition-all" style="width:0%"></div></div>
+
+        <div id="sm-summary" class="grid grid-cols-3 gap-4 mb-4 hidden">
+          <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+            <div class="text-xs text-gray-500 mb-1">サブサイトマップ数</div>
+            <div class="text-2xl font-bold text-indigo-600" id="sm-sumCount">-</div>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+            <div class="text-xs text-gray-500 mb-1">総URL数</div>
+            <div class="text-2xl font-bold text-indigo-600" id="sm-sumUrls">-</div>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+            <div class="text-xs text-gray-500 mb-1">最終更新</div>
+            <div class="text-lg font-bold text-indigo-600 pt-1" id="sm-sumLatest">-</div>
+          </div>
+        </div>
+
+        <div id="sm-filterBar" class="flex items-center gap-3 mb-3 hidden">
+          <input type="text" id="sm-filterInput"
+            class="border border-gray-200 rounded-lg px-3 py-2 text-sm w-64 focus:outline-none focus:border-indigo-400"
+            placeholder="サイトマップ名で絞り込み..." oninput="smFilterTable()">
+          <span id="sm-filteredCount" class="text-xs text-gray-500"></span>
+        </div>
+
+        <div class="overflow-x-auto hidden" id="sm-tableWrap">
+          <table class="w-full text-sm bg-white rounded-xl shadow-sm overflow-hidden">
+            <thead>
+              <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                <th class="px-3 py-3 text-center cursor-pointer hover:bg-gray-100 select-none" onclick="smSortTable(0)">#</th>
+                <th class="px-3 py-3 text-left cursor-pointer hover:bg-gray-100 select-none" onclick="smSortTable(1)">サイトマップ</th>
+                <th class="px-3 py-3 text-center cursor-pointer hover:bg-gray-100 select-none" onclick="smSortTable(2)">URL数</th>
+                <th class="px-3 py-3 text-center cursor-pointer hover:bg-gray-100 select-none" onclick="smSortTable(3)">最終更新</th>
+                <th class="px-3 py-3 text-center">操作</th>
+              </tr>
+            </thead>
+            <tbody id="sm-tableBody" class="divide-y divide-gray-100"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- 基本情報タブ -->
     <div id="tab-info" class="tab-content">
       <div class="p-5 grid md:grid-cols-2 gap-6">
@@ -599,7 +651,7 @@
   </div>
 </div>
 
-<footer class="text-center text-xs text-gray-400 py-6">弁護士法人ブライト 内部資料 · 外部公開禁止 · 更新: 2026-05-16 10:01 JST</footer>
+<footer class="text-center text-xs text-gray-400 py-6">弁護士法人ブライト 内部資料 · 外部公開禁止 · 更新: 2026-05-16 10:43 JST</footer>
 
 <script>
 // ── データ ──────────────────────────────────────────
@@ -743,11 +795,164 @@ function applyFilter() {
   });
 }
 
-function switchTab(name) {
+function switchTab(name, btn) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
-  event.currentTarget.classList.add('active');
+  if (btn) btn.classList.add('active');
+  applyFilter();  // タブ切替時にも現在のフィルターを再適用
+}
+
+// ── サイトマップビューア（西田紗知さん作成） ──────────────────────────
+const SM_SITEMAP_INDEX = 'https://law-bright.com/sitemap.xml';
+const SM_PROXIES = [
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+];
+let smAllRows = [];
+let smSortCol = -1, smSortAsc = true;
+
+function smSetStatus(msg, type='') {
+  const el = document.getElementById('sm-status');
+  el.textContent = msg;
+  el.style.color = type === 'err' ? '#dc2626' : type === 'ok' ? '#16a34a' : '#4a5568';
+}
+
+function smSetProgress(pct) {
+  document.getElementById('sm-progressFill').style.width = pct + '%';
+}
+
+async function smFetchXML(url) {
+  let lastErr;
+  for (const proxy of SM_PROXIES) {
+    try {
+      const res = await fetch(proxy(url), { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      if (!text.trim().startsWith('<')) throw new Error('XMLではないレスポンス');
+      return new DOMParser().parseFromString(text, 'text/xml');
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
+function smFormatDate(str) {
+  if (!str) return '-';
+  try {
+    const d = new Date(str);
+    return d.toLocaleDateString('ja-JP', {year:'numeric',month:'2-digit',day:'2-digit'})
+      + ' ' + d.toLocaleTimeString('ja-JP', {hour:'2-digit',minute:'2-digit'});
+  } catch { return str; }
+}
+
+async function smLoadSitemap() {
+  const btn = document.getElementById('sm-loadBtn');
+  btn.disabled = true;
+  document.getElementById('sm-tableWrap').classList.add('hidden');
+  document.getElementById('sm-summary').classList.add('hidden');
+  document.getElementById('sm-filterBar').classList.add('hidden');
+  smSetProgress(5);
+  smSetStatus('sitemap.xml を取得中...');
+
+  try {
+    const indexDoc = await smFetchXML(SM_SITEMAP_INDEX);
+    const sitemaps = [...indexDoc.querySelectorAll('sitemap')];
+    smSetProgress(15);
+    smSetStatus(`${sitemaps.length} 件のサブサイトマップを確認。URL数を取得中...`);
+
+    smAllRows = [];
+    let totalUrls = 0;
+    let latestDate = '';
+
+    for (let i = 0; i < sitemaps.length; i++) {
+      const locEl = sitemaps[i].querySelector('loc');
+      const lastmodEl = sitemaps[i].querySelector('lastmod');
+      if (!locEl) continue;
+      const url = locEl.textContent.trim();
+      const lastmod = lastmodEl ? lastmodEl.textContent.trim() : '';
+      const name = url.replace('https://law-bright.com/', '').replace('.xml', '');
+
+      let count = '-';
+      try {
+        const subDoc = await smFetchXML(url);
+        const urls = subDoc.querySelectorAll('url');
+        count = urls.length;
+        totalUrls += count;
+      } catch (e) { count = 'エラー'; }
+
+      if (lastmod && lastmod > latestDate) latestDate = lastmod;
+      smAllRows.push({ url, name, count, lastmod });
+      smSetProgress(15 + Math.round((i + 1) / sitemaps.length * 80));
+      smSetStatus(`取得中... (${i + 1}/${sitemaps.length}) ${name}`);
+      smRenderTable(smAllRows);
+    }
+
+    document.getElementById('sm-sumCount').textContent = smAllRows.length;
+    document.getElementById('sm-sumUrls').textContent = totalUrls.toLocaleString();
+    document.getElementById('sm-sumLatest').textContent = smFormatDate(latestDate).split(' ')[0];
+    document.getElementById('sm-summary').classList.remove('hidden');
+    document.getElementById('sm-filterBar').classList.remove('hidden');
+    document.getElementById('sm-filteredCount').textContent = `${smAllRows.length} 件`;
+    document.getElementById('sm-lastChecked').textContent = '最終取得: ' + new Date().toLocaleString('ja-JP');
+    smSetProgress(100);
+    smSetStatus(`完了 — ${smAllRows.length} サイトマップ、合計 ${totalUrls.toLocaleString()} URL`, 'ok');
+  } catch (e) {
+    smSetStatus('取得エラー: ' + e.message, 'err');
+    console.error(e);
+  }
+
+  btn.disabled = false;
+  setTimeout(() => smSetProgress(0), 1000);
+}
+
+function smRenderTable(rows) {
+  const tbody = document.getElementById('sm-tableBody');
+  const filter = (document.getElementById('sm-filterInput')?.value || '').toLowerCase();
+  const filtered = filter ? rows.filter(r => r.name.toLowerCase().includes(filter)) : rows;
+
+  tbody.innerHTML = filtered.map((r, i) => `
+    <tr class="hover:bg-gray-50 transition-colors">
+      <td class="px-3 py-2 text-center text-gray-400 text-xs">${i + 1}</td>
+      <td class="px-3 py-2">
+        <a href="${r.url}" target="_blank" class="text-blue-700 font-mono text-xs hover:underline">${r.name}</a>
+        ${r.name.includes('cat') ? '<span class="inline-block ml-1 px-1 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded">カテゴリ</span>' : ''}
+        ${r.name === 'addl-sitemap' ? '<span class="inline-block ml-1 px-1 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded">追加</span>' : ''}
+      </td>
+      <td class="px-3 py-2 text-center">
+        ${typeof r.count === 'number'
+          ? `<span class="inline-block bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded-full">${r.count.toLocaleString()} URLs</span>`
+          : `<span class="text-red-600 text-xs">${r.count}</span>`}
+      </td>
+      <td class="px-3 py-2 text-center text-gray-500 text-xs">${smFormatDate(r.lastmod)}</td>
+      <td class="px-3 py-2 text-center">
+        <button class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 px-2 py-1 rounded text-xs cursor-pointer transition-colors"
+          onclick="window.open('${r.url}','_blank')">開く</button>
+      </td>
+    </tr>
+  `).join('');
+
+  document.getElementById('sm-tableWrap').classList.remove('hidden');
+  const fc = document.getElementById('sm-filteredCount');
+  if (fc) fc.textContent = `${filtered.length} 件`;
+}
+
+function smFilterTable() { smRenderTable(smAllRows); }
+
+function smSortTable(col) {
+  if (smSortCol === col) smSortAsc = !smSortAsc;
+  else { smSortCol = col; smSortAsc = true; }
+  smAllRows.sort((a, b) => {
+    if (col === 0) return 0;
+    let va, vb;
+    if (col === 1) { va = a.name; vb = b.name; }
+    else if (col === 2) { va = typeof a.count === 'number' ? a.count : -1; vb = typeof b.count === 'number' ? b.count : -1; }
+    else if (col === 3) { va = a.lastmod || ''; vb = b.lastmod || ''; }
+    if (va < vb) return smSortAsc ? -1 : 1;
+    if (va > vb) return smSortAsc ? 1 : -1;
+    return 0;
+  });
+  smRenderTable(smAllRows);
 }
 </script>
 </body>
