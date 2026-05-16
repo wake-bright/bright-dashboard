@@ -10,8 +10,10 @@ import os
 import sys
 import subprocess
 import requests
+from collections import defaultdict
 from datetime import datetime, date, timezone, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 from dotenv import dotenv_values
 
 # GA4/GSC API（google-auth使用）
@@ -108,6 +110,42 @@ def fetch_cpt_counts():
     return results
 
 
+def fetch_ga4_by_cat(days=30):
+    """GA4からページパス別セッション・CVを取得してジャンル別に集計"""
+    if not HAS_GOOGLE:
+        return None
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/analytics.readonly"])
+        creds.refresh(google.auth.transport.requests.Request())
+        svc = build("analyticsdata", "v1beta", credentials=creds, cache_discovery=False)
+        end = date.today().strftime("%Y-%m-%d")
+        start = (date.today() - timedelta(days=days-1)).strftime("%Y-%m-%d")
+        resp = svc.properties().runReport(
+            property="properties/316908797",
+            body={
+                "dateRanges": [{"startDate": start, "endDate": end}],
+                "dimensions": [{"name": "pagePath"}],
+                "metrics": [{"name": "sessions"}, {"name": "conversions"}],
+                "limit": 10000,
+                "orderBys": [{"metric": {"metricName": "sessions"}, "desc": True}],
+            }
+        ).execute()
+        cat_s  = {"all": 0, "komon": 0, "rosai": 0, "kotsu": 0, "other": 0}
+        cat_cv = {"all": 0, "komon": 0, "rosai": 0, "kotsu": 0, "other": 0}
+        for row in resp.get("rows", []):
+            path = row["dimensionValues"][0]["value"]
+            cat  = page_cat(f"https://law-bright.com{path}")
+            s  = int(row["metricValues"][0]["value"])
+            cv = int(float(row["metricValues"][1]["value"]))
+            cat_s["all"]  += s;  cat_s[cat]  += s
+            cat_cv["all"] += cv; cat_cv[cat] += cv
+        print(f"  GA4 by cat: sessions={cat_s['all']:,} / CV={cat_cv['all']:,}")
+        return {"sessions": cat_s, "conv": cat_cv}
+    except Exception as e:
+        print(f"  GA4 by cat エラー（フォールバック使用）: {e}")
+        return None
+
+
 def fetch_ga4(days=30):
     """GA4 APIから日次セッション・CV数を取得（google ADC使用）"""
     if not HAS_GOOGLE:
@@ -192,7 +230,168 @@ def fetch_gsc_pages(days=28, limit=20):
     return results
 
 
-def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
+# ── 記事管理タブ用 ────────────────────────────────────────────────────
+
+ARTICLE_CPTS = [
+    {"slug": "labor-accident", "dai": "労災",    "supervisor": "笹野 皓平"},
+    {"slug": "kotuziko",       "dai": "交通事故", "supervisor": "松本 洋明"},
+    {"slug": "corporationlaw", "dai": "企業法務", "supervisor": "和氣 良浩"},
+    {"slug": "legaladvisor",   "dai": "企業法務", "supervisor": "和氣 良浩"},
+    {"slug": "manda",          "dai": "企業法務", "supervisor": "和氣 良浩"},
+    {"slug": "employee",       "dai": "企業法務", "supervisor": "和氣 良浩"},
+]
+
+CORP_CONTENTS = {
+    "company": "顧問・会社法務", "keiyaku": "契約書", "roumu": "労務",
+    "customer-harassment": "カスハラ", "syohisya": "消費者問題",
+    "saiken": "債権回収", "enjyo": "助成金", "media": "メディア・IT",
+}
+
+
+def get_sho_cat(post: dict, cpt: str) -> str:
+    path  = urlparse(post.get("link", "")).path
+    slug  = path.rstrip("/").split("/")[-1]
+    parts = [p for p in path.strip("/").split("/") if p]
+
+    if cpt == "labor-accident":
+        if "jirei" in slug or "jirei" in path: return "解決事例"
+        if "form" in slug:                     return "申請書類"
+        return "基礎知識"
+
+    if cpt == "kotuziko":
+        if slug.startswith("kt-") or "koui-shogai" in slug:           return "後遺障害"
+        if any(k in slug for k in ("commute","tsukin","tsukinsaigai")): return "通勤災害×交通事故"
+        if "rosai" in slug:                                             return "労災×交通事故"
+        if any(k in slug for k in ("appaku","kossetsu","lumbar","daitai","sekitsui","sakotsu","fracture")): return "骨折・圧迫骨折"
+        if any(k in slug for k in ("muchiuchi","keitsui","whiplash")):  return "むちうち"
+        if any(k in slug for k in ("kashitsu","kasitu")):               return "過失割合"
+        if any(k in slug for k in ("isharyo","compensation","-soba")):  return "慰謝料・相場"
+        return "交通事故（一般）"
+
+    if cpt == "corporationlaw":
+        if len(parts) >= 3 and parts[1] == "contents":
+            return CORP_CONTENTS.get(parts[2], parts[2])
+        if "minna-no-houmubu" in path: return "みんなの法務部"
+        return "ピラー・概要"
+
+    if cpt == "legaladvisor":
+        sub = parts[1] if len(parts) >= 2 else ""
+        return {"preventive":"予防法務","dispute":"紛争解決","guide":"選び方ガイド",
+                "strategic":"事業承継・戦略","cases":"解決事例"}.get(sub, "その他")
+
+    return {"manda": "M&A", "employee": "問題社員"}.get(cpt, "")
+
+
+def fetch_all_articles_wp() -> list:
+    """WP REST API から記事管理対象CPTの全記事を取得"""
+    all_articles = []
+    for info in ARTICLE_CPTS:
+        slug, count = info["slug"], 0
+        page = 1
+        while True:
+            try:
+                r = requests.get(
+                    f"{WP_BASE}/wp-json/wp/v2/{slug}",
+                    params={"status":"publish","per_page":100,"page":page,
+                            "_fields":"id,title,link,date,featured_media"},
+                    auth=AUTH, timeout=30,
+                )
+                if r.status_code in (400, 404): break
+                r.raise_for_status()
+                data = r.json()
+                if not data: break
+                for post in data:
+                    all_articles.append({
+                        "id":         post["id"],
+                        "title":      post["title"]["rendered"],
+                        "link":       post["link"],
+                        "date":       post["date"][:10],
+                        "eyecatch":   post.get("featured_media", 0) != 0,
+                        "cpt":        slug,
+                        "dai":        info["dai"],
+                        "sho":        get_sho_cat(post, slug),
+                        "supervisor": info["supervisor"],
+                    })
+                count += len(data)
+                if len(data) < 100: break
+                page += 1
+            except Exception as e:
+                print(f"    WP エラー ({slug} p{page}): {e}")
+                break
+        print(f"  [{info['dai']:5s}] {slug}: {count}本")
+    return all_articles
+
+
+def fetch_gsc_for_articles(days: int = 30):
+    """記事管理用 GSC データ（当月・前月・上位クエリ）を全ページ分取得"""
+    if not HAS_GOOGLE:
+        return {}, {}, {}
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
+        creds.refresh(google.auth.transport.requests.Request())
+        svc = build("searchconsole", "v1", credentials=creds, cache_discovery=False)
+
+        end    = date.today() - timedelta(days=2)
+        start  = end   - timedelta(days=days - 1)
+        p_end  = start - timedelta(days=1)
+        p_start= p_end - timedelta(days=days - 1)
+
+        def page_stats(s, e):
+            resp = svc.searchanalytics().query(
+                siteUrl="https://law-bright.com/",
+                body={"startDate": s.isoformat(), "endDate": e.isoformat(),
+                      "dimensions": ["page"], "rowLimit": 25000},
+            ).execute()
+            return {row["keys"][0]: {"clicks": int(row["clicks"]),
+                                     "impressions": int(row["impressions"]),
+                                     "position": round(row["position"], 1)}
+                    for row in resp.get("rows", [])}
+
+        curr = page_stats(start, end)
+        prev = page_stats(p_start, p_end)
+
+        resp_pq = svc.searchanalytics().query(
+            siteUrl="https://law-bright.com/",
+            body={"startDate": start.isoformat(), "endDate": end.isoformat(),
+                  "dimensions": ["page", "query"], "rowLimit": 25000},
+        ).execute()
+        pq = defaultdict(list)
+        for row in resp_pq.get("rows", []):
+            url, q = row["keys"]
+            pq[url].append((int(row["clicks"]), q))
+        top_q = {url: sorted(ql, reverse=True)[0][1] for url, ql in pq.items() if ql}
+
+        print(f"  GSC記事: 当月{len(curr)}件, 前月{len(prev)}件")
+        return curr, prev, top_q
+    except Exception as e:
+        print(f"  GSC記事 APIエラー: {e}")
+        return {}, {}, {}
+
+
+def calc_article_change(curr: dict, prev: dict) -> tuple:
+    c_pos = curr.get("position")
+    p_pos = prev.get("position")
+    c_clk = curr.get("clicks", 0)
+    p_clk = prev.get("clicks", 0)
+
+    if c_pos is not None and p_pos is None: return "新規", "新規", "🆕 新規流入"
+    if c_pos is None:                       return "—",   "—",   "—"
+
+    pos_delta = round(p_pos - c_pos, 1) if p_pos is not None else 0.0
+    pos_str   = (f"+{pos_delta}" if pos_delta > 0 else str(pos_delta)) if p_pos else "—"
+    clk_pct   = (c_clk - p_clk) / p_clk * 100 if p_clk > 0 else 0.0
+    clk_str   = (f"+{clk_pct:.0f}%" if clk_pct >= 0 else f"{clk_pct:.0f}%") if p_clk > 0 else "—"
+
+    if   pos_delta >= 5  or clk_pct >= 50:  status = "🚀 急上昇"
+    elif pos_delta >= 2  or clk_pct >= 20:  status = "📈 改善"
+    elif pos_delta <= -5 or clk_pct <= -50: status = "💥 急落"
+    elif pos_delta <= -2 or clk_pct <= -20: status = "📉 悪化"
+    else:                                    status = "—"
+
+    return pos_str, clk_str, status
+
+
+def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, ga4_cat=None):
     total_pub   = sum(c["publish"] for c in cpt_data)
     total_draft = sum(c["draft"]   for c in cpt_data)
 
@@ -229,7 +428,10 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
         pos = round(sum(p["position"] * p["clicks"] for p in pg) / cl, 1) if cl else 0
         pub = sum(c["publish"] for c in cpt_data if cat == "all" or c["cat"] == cat)
         dft = sum(c["draft"]   for c in cpt_data if cat == "all" or c["cat"] == cat)
-        cat_metrics[cat] = {"clicks": cl, "imps": im, "ctr": ctr, "pos": pos, "pub": pub, "draft": dft}
+        s  = ga4_cat["sessions"].get(cat, 0) if ga4_cat else (ga4_sessions if cat == "all" else 0)
+        cv = ga4_cat["conv"].get(cat, 0)    if ga4_cat else 0
+        cat_metrics[cat] = {"clicks": cl, "imps": im, "ctr": ctr, "pos": pos,
+                            "pub": pub, "draft": dft, "sessions": s, "conv": cv}
     cat_metrics_js = json.dumps(cat_metrics)
 
     # 記事ステータス行（クリックで記事一覧展開）
@@ -347,6 +549,7 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
   .filter-btn.active-rosai {{ background: #ef4444; color: white; }}
   .filter-btn.active-kotsu {{ background: #f59e0b; color: white; }}
   .filter-btn.active-other {{ background: #64748b; color: white; }}
+  .am-filter-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
 </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -386,11 +589,16 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
 <div class="max-w-7xl mx-auto px-4 py-5">
 
   <!-- KPIカード -->
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-5">
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
-      <div class="text-xs text-gray-500 mb-1" id="kpi-sessions-label">セッション（30日）</div>
+      <div class="text-xs text-gray-500 mb-1">セッション（30日）</div>
       <div class="text-2xl font-bold text-gray-900" id="kpi-sessions">{ga4_sessions:,}</div>
       <div class="text-xs text-indigo-600 mt-1" id="kpi-sessions-sub">GA4 · 全ジャンル計</div>
+    </div>
+    <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+      <div class="text-xs text-gray-500 mb-1">コンバージョン（30日）</div>
+      <div class="text-2xl font-bold text-gray-900" id="kpi-conv">{ga4_conversions:,}</div>
+      <div class="text-xs text-green-600 mt-1" id="kpi-conv-sub">GA4 · 全ジャンル計</div>
     </div>
     <div class="kpi-card bg-white rounded-xl shadow-sm p-4 border border-gray-100">
       <div class="text-xs text-gray-500 mb-1">クリック（28日）</div>
@@ -435,6 +643,7 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
       <button class="tab-btn active px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('kpi',this)">📊 KPI</button>
       <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('articles',this)">📝 記事ステータス</button>
       <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('pages',this)">🏆 上位ページ</button>
+      <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('artmgr',this)">📋 記事管理</button>
       <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('tasks',this)">✅ タスク</button>
       <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('info',this)">ℹ️ 基本情報</button>
       <button class="tab-btn px-5 py-3 text-sm whitespace-nowrap" onclick="switchTab('sitemap',this)">🗺️ サイトマップ</button>
@@ -504,6 +713,68 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
               </tr>
             </thead>
             <tbody id="pages-tbody" class="divide-y divide-gray-100">{page_rows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 記事管理タブ -->
+    <div id="tab-artmgr" class="tab-content">
+      <div class="p-4">
+        <!-- サマリ行 -->
+        <div id="am-summary" class="grid grid-cols-4 gap-3 mb-4 text-center">
+          <div class="bg-white rounded-lg border border-gray-100 shadow-sm p-3">
+            <div class="text-xs text-gray-500">総記事数</div>
+            <div class="text-xl font-bold text-gray-800" id="am-total">—</div>
+          </div>
+          <div class="bg-indigo-50 rounded-lg border border-indigo-100 p-3 cursor-pointer hover:bg-indigo-100 transition-colors" onclick="setArtFilter('top10',this)">
+            <div class="text-xs text-indigo-600">🔝 上位10位圏内</div>
+            <div class="text-xl font-bold text-indigo-700" id="am-top10">—</div>
+          </div>
+          <div class="bg-yellow-50 rounded-lg border border-yellow-100 p-3 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="setArtFilter('rewrite',this)">
+            <div class="text-xs text-yellow-600">✏️ リライト推奨</div>
+            <div class="text-xl font-bold text-yellow-700" id="am-rewrite">—</div>
+          </div>
+          <div class="bg-red-50 rounded-lg border border-red-100 p-3 cursor-pointer hover:bg-red-100 transition-colors" onclick="setArtFilter('drop',this)">
+            <div class="text-xs text-red-600">💥 急落記事</div>
+            <div class="text-xl font-bold text-red-700" id="am-drop">—</div>
+          </div>
+        </div>
+
+        <!-- フィルター行 -->
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <span class="text-xs text-gray-500">フィルター：</span>
+          <button class="am-filter-btn active text-xs px-3 py-1 rounded-full border border-gray-300 font-semibold" onclick="setArtFilter('all',this)">全て</button>
+          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-indigo-300 text-indigo-700 font-semibold" onclick="setArtFilter('top10',this)">🔝 上位10位</button>
+          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-yellow-300 text-yellow-700 font-semibold" onclick="setArtFilter('rewrite',this)">✏️ リライト推奨</button>
+          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-green-300 text-green-700 font-semibold" onclick="setArtFilter('rise',this)">🚀 急上昇</button>
+          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-red-300 text-red-700 font-semibold" onclick="setArtFilter('drop',this)">💥 急落</button>
+          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-gray-300 text-gray-600 font-semibold" onclick="setArtFilter('noimg',this)">🖼️ アイキャッチなし</button>
+          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-orange-300 text-orange-700 font-semibold" onclick="setArtFilter('new',this)">🆕 新規流入</button>
+          <input type="text" id="am-search" placeholder="タイトル・クエリで絞り込み..." oninput="renderArtTable()"
+            class="ml-auto border border-gray-200 rounded-lg px-3 py-1.5 text-xs w-52 focus:outline-none focus:border-indigo-400">
+        </div>
+
+        <!-- 件数表示 -->
+        <div class="text-xs text-gray-400 mb-2" id="am-count">読み込み中...</div>
+
+        <!-- テーブル -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="bg-gray-50 text-gray-500 uppercase tracking-wide select-none">
+                <th class="px-3 py-2 text-left cursor-pointer hover:bg-gray-100" onclick="toggleArtSort('title')">タイトル <span id="s-title"></span></th>
+                <th class="px-3 py-2 text-left cursor-pointer hover:bg-gray-100 w-20" onclick="toggleArtSort('sho')">小カテゴリ <span id="s-sho"></span></th>
+                <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-20" onclick="toggleArtSort('date')">公開日 <span id="s-date"></span></th>
+                <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-14" onclick="toggleArtSort('eyecatch')">👁 <span id="s-eyecatch"></span></th>
+                <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-14" onclick="toggleArtSort('position')">順位 <span id="s-position"></span></th>
+                <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-16" onclick="toggleArtSort('clicks')">クリック <span id="s-clicks"></span></th>
+                <th class="px-3 py-2 text-left w-36">上位クエリ</th>
+                <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-20" onclick="toggleArtSort('status')">変化 <span id="s-status"></span></th>
+                <th class="px-3 py-2 text-center w-16">操作</th>
+              </tr>
+            </thead>
+            <tbody id="am-tbody" class="divide-y divide-gray-100"></tbody>
           </table>
         </div>
       </div>
@@ -622,6 +893,7 @@ const gscClicks   = {json.dumps(gsc_clicks)};
 const gscImps     = {json.dumps(gsc_imps)};
 const GA4_TOTAL   = {ga4_sessions};
 const catMetrics  = {cat_metrics_js};
+const ARTICLES    = {json.dumps(articles_data or [])};
 
 const CAT_COLORS = {{ all:'#6366f1', komon:'#10b981', rosai:'#ef4444', kotsu:'#f59e0b', other:'#64748b' }};
 const CAT_LABELS = {{ all:'全ジャンル', komon:'企業法務', rosai:'労災', kotsu:'交通事故', other:'その他' }};
@@ -671,9 +943,13 @@ function updateKpiCards(cat) {{
   const label = CAT_LABELS[cat];
   const isAll = cat === 'all';
 
-  // セッション：GA4はジャンル別内訳なし → 全体値を常時表示
-  document.getElementById('kpi-sessions').textContent = fmt(GA4_TOTAL);
-  document.getElementById('kpi-sessions-sub').textContent = isAll ? 'GA4 · 全ジャンル計' : 'GA4 · ※全体値（ジャンル別内訳なし）';
+  // セッション（GA4 ページパス別集計）
+  document.getElementById('kpi-sessions').textContent = fmt(m.sessions);
+  document.getElementById('kpi-sessions-sub').textContent = `GA4 · ${{label}}`;
+
+  // コンバージョン（GA4 ページパス別集計）
+  document.getElementById('kpi-conv').textContent = fmt(m.conv);
+  document.getElementById('kpi-conv-sub').textContent = `GA4 · ${{label}}`;
 
   // クリック
   document.getElementById('kpi-clicks').textContent = fmt(m.clicks);
@@ -758,6 +1034,11 @@ function applyFilter() {{
   document.querySelectorAll('.cat-summary-card').forEach(card => {{
     card.style.opacity = (cat === 'all' || card.dataset.cat === cat) ? '1' : '0.35';
   }});
+
+  // 記事管理タブが表示中なら再描画
+  if (document.getElementById('tab-artmgr').classList.contains('active')) {{
+    renderArtTable();
+  }}
 }}
 
 function switchTab(name, btn) {{
@@ -766,6 +1047,7 @@ function switchTab(name, btn) {{
   document.getElementById('tab-' + name).classList.add('active');
   if (btn) btn.classList.add('active');
   applyFilter();  // タブ切替時にも現在のフィルターを再適用
+  if (name === 'artmgr') renderArtTable();
 }}
 
 // ── 記事一覧展開（WP REST API） ──────────────────────────────────────
@@ -971,6 +1253,117 @@ function smRenderTable(rows) {{
 
 function smFilterTable() {{ smRenderTable(smAllRows); }}
 
+// ── 記事管理タブ ──────────────────────────────────────
+const DAI_CAT = {{'労災':'rosai','交通事故':'kotsu','企業法務':'komon'}};
+let artFilter  = 'all';
+let artSortCol = 'date';
+let artSortAsc = false;
+
+function setArtFilter(f, btn) {{
+  artFilter = f;
+  document.querySelectorAll('.am-filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderArtTable();
+}}
+
+function toggleArtSort(col) {{
+  if (artSortCol === col) artSortAsc = !artSortAsc;
+  else {{ artSortCol = col; artSortAsc = true; }}
+  ['title','sho','date','eyecatch','position','clicks','status'].forEach(c => {{
+    const el = document.getElementById('s-' + c);
+    if (el) el.textContent = '';
+  }});
+  const el = document.getElementById('s-' + col);
+  if (el) el.textContent = artSortAsc ? ' ▲' : ' ▼';
+  renderArtTable();
+}}
+
+function renderArtTable() {{
+  const tbody = document.getElementById('am-tbody');
+  if (!tbody) return;
+  const cat    = currentFilter;
+  const search = (document.getElementById('am-search')?.value || '').toLowerCase();
+
+  let items = ARTICLES.filter(a => {{
+    if (cat !== 'all') {{
+      const ac = DAI_CAT[a.dai] || 'other';
+      if (ac !== cat) return false;
+    }}
+    if (artFilter === 'top10'   && (!a.position || a.position > 10))              return false;
+    if (artFilter === 'rewrite' && (!a.position || a.position <= 20 || (a.clicks||0) >= 10)) return false;
+    if (artFilter === 'rise'    && !(a.status||'').includes('急上昇'))              return false;
+    if (artFilter === 'drop'    && !(a.status||'').includes('急落'))               return false;
+    if (artFilter === 'noimg'   && a.eyecatch)                                     return false;
+    if (artFilter === 'new'     && !(a.status||'').includes('新規'))               return false;
+    if (search) {{
+      const hay = ((a.title||'') + ' ' + (a.top_query||'')).toLowerCase();
+      if (!hay.includes(search)) return false;
+    }}
+    return true;
+  }});
+
+  items.sort((a, b) => {{
+    let va, vb;
+    if      (artSortCol === 'title')    {{ va = a.title   ||''; vb = b.title   ||''; }}
+    else if (artSortCol === 'sho')      {{ va = a.sho     ||''; vb = b.sho     ||''; }}
+    else if (artSortCol === 'date')     {{ va = a.date    ||''; vb = b.date    ||''; }}
+    else if (artSortCol === 'eyecatch') {{ va = a.eyecatch? 1:0; vb = b.eyecatch? 1:0; }}
+    else if (artSortCol === 'position') {{ va = a.position||999; vb = b.position||999; }}
+    else if (artSortCol === 'clicks')   {{ va = a.clicks  ||0;  vb = b.clicks  ||0; }}
+    else if (artSortCol === 'status')   {{ va = a.status  ||''; vb = b.status  ||''; }}
+    else {{ va = 0; vb = 0; }}
+    if (va < vb) return artSortAsc ? -1 : 1;
+    if (va > vb) return artSortAsc ? 1 : -1;
+    return 0;
+  }});
+
+  tbody.innerHTML = items.map(a => {{
+    const pos    = a.position;
+    const posStr = pos ? pos.toFixed(1) : '—';
+    const posCls = !pos ? 'text-gray-300'
+      : pos <= 3  ? 'text-green-700 font-bold'
+      : pos <= 10 ? 'text-green-600'
+      : pos <= 20 ? 'text-yellow-600' : 'text-red-600';
+    const st    = a.status || '—';
+    const stCls = st.includes('急上昇') ? 'text-green-600 font-bold'
+      : st.includes('改善')   ? 'text-green-500'
+      : st.includes('急落')   ? 'text-red-600 font-bold'
+      : st.includes('悪化')   ? 'text-orange-500'
+      : st.includes('新規')   ? 'text-blue-600' : 'text-gray-400';
+    const eye  = a.eyecatch ? '✅' : '<span class="text-red-400">✗</span>';
+    const clks = a.clicks   ? a.clicks.toLocaleString('ja-JP') : '—';
+    const wpEd = 'https://law-bright.com/wp-admin/post.php?post=' + a.id + '&action=edit';
+    const tq   = a.top_query || '—';
+    return `<tr class="hover:bg-gray-50 transition-colors">
+      <td class="px-3 py-2 max-w-xs">
+        <a href="${{a.link}}" target="_blank" class="text-blue-700 hover:underline">${{a.title}}</a>
+        <span class="text-gray-400 text-xs ml-1">${{a.dai}}</span>
+      </td>
+      <td class="px-3 py-2 text-gray-600 text-xs">${{a.sho}}</td>
+      <td class="px-3 py-2 text-center text-gray-500 whitespace-nowrap">${{a.date}}</td>
+      <td class="px-3 py-2 text-center">${{eye}}</td>
+      <td class="px-3 py-2 text-center ${{posCls}}">${{posStr}}</td>
+      <td class="px-3 py-2 text-center font-semibold">${{clks}}</td>
+      <td class="px-3 py-2 text-gray-500 text-xs truncate max-w-[9rem]" title="${{tq}}">${{tq}}</td>
+      <td class="px-3 py-2 text-center ${{stCls}} whitespace-nowrap text-xs">${{st}}</td>
+      <td class="px-3 py-2 text-center whitespace-nowrap">
+        <a href="${{a.link}}" target="_blank" class="text-blue-500 text-xs hover:underline mr-1" title="表示">↗</a>
+        <a href="${{wpEd}}" target="_blank" class="text-orange-500 text-xs hover:underline" title="WP編集">✏️</a>
+      </td>
+    </tr>`;
+  }}).join('');
+
+  const countEl = document.getElementById('am-count');
+  if (countEl) countEl.textContent = items.length.toLocaleString('ja-JP') + ' 件 / 全 ' + ARTICLES.length.toLocaleString('ja-JP') + ' 件';
+  const setCard = (id, val) => {{ const el = document.getElementById(id); if (el) el.textContent = val; }};
+  setCard('am-total',   ARTICLES.length.toLocaleString('ja-JP'));
+  setCard('am-top10',   ARTICLES.filter(a => a.position && a.position <= 10).length);
+  setCard('am-rewrite', ARTICLES.filter(a => a.position && a.position > 20 && (a.clicks||0) < 10).length);
+  setCard('am-drop',    ARTICLES.filter(a => (a.status||'').includes('急落')).length);
+}}
+
+document.addEventListener('DOMContentLoaded', renderArtTable);
+
 function smSortTable(col) {{
   if (smSortCol === col) smSortAsc = !smSortAsc;
   else {{ smSortCol = col; smSortAsc = true; }}
@@ -1001,8 +1394,9 @@ if __name__ == "__main__":
 
     # GA4/GSC: APIから取得 → 失敗時はフォールバックデータを使用
     print("⏳ GA4/GSCデータを取得中...")
-    GA4_LIVE  = fetch_ga4(days=30)
-    GSC_LIVE  = fetch_gsc_daily(days=28)
+    GA4_LIVE      = fetch_ga4(days=30)
+    GA4_CAT_LIVE  = fetch_ga4_by_cat(days=30)
+    GSC_LIVE      = fetch_gsc_daily(days=28)
     GSC_PAGES_LIVE = fetch_gsc_pages(days=28, limit=20)
 
     # ── フォールバックデータ（APIが使えない場合） ──────────────
@@ -1094,8 +1488,29 @@ if __name__ == "__main__":
     GSC_DAILY  = GSC_LIVE  or GSC_DAILY_FALLBACK
     GSC_PAGES  = GSC_PAGES_LIVE or GSC_PAGES_FALLBACK
 
+    # 記事管理データ取得
+    print("⏳ 記事管理データ取得中...")
+    wp_articles = fetch_all_articles_wp()
+    gsc_curr, gsc_prev, top_queries = fetch_gsc_for_articles(days=30)
+    articles_data = []
+    for art in wp_articles:
+        url = art["link"]
+        curr = gsc_curr.get(url, {})
+        prev = gsc_prev.get(url, {})
+        pos_ch, clk_ch, status = calc_article_change(curr, prev)
+        articles_data.append({**art,
+            "clicks":     curr.get("clicks", 0),
+            "imps":       curr.get("impressions", 0),
+            "position":   curr.get("position"),
+            "top_query":  top_queries.get(url, ""),
+            "pos_change": pos_ch,
+            "clk_change": clk_ch,
+            "status":     status,
+        })
+    print(f"  記事管理: {len(articles_data)}本 マージ完了")
+
     print("⏳ HTML生成中...")
-    html = generate_html(cpt_data, GA4_DATA, GSC_DAILY, GSC_PAGES)
+    html = generate_html(cpt_data, GA4_DATA, GSC_DAILY, GSC_PAGES, articles_data, GA4_CAT_LIVE)
     out_path = Path(__file__).parent / "docs" / "index.html"
     out_path.parent.mkdir(exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
