@@ -234,7 +234,7 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
         cat_metrics[cat] = {"clicks": cl, "imps": im, "ctr": ctr, "pos": pos, "pub": pub, "draft": dft}
     cat_metrics_js = json.dumps(cat_metrics)
 
-    # 記事ステータス行
+    # 記事ステータス行（クリックで記事一覧展開）
     cpt_rows = ""
     for c in sorted(cpt_data, key=lambda x: -x["publish"]):
         if c["total"] == 0:
@@ -244,21 +244,36 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
         cat_label = {"komon":"企業法務","rosai":"労災","kotsu":"交通事故","other":"その他"}[c["cat"]]
         cat_colors = {"komon":"bg-emerald-100 text-emerald-700","rosai":"bg-red-100 text-red-700","kotsu":"bg-amber-100 text-amber-700","other":"bg-slate-100 text-slate-600"}
         badge_cls = cat_colors[c["cat"]]
+        wp_post_type = {"pages": "page", "posts": "post"}.get(c["slug"], c["slug"])
         cpt_rows += f"""
-        <tr class="hover:bg-gray-50 transition-colors cpt-row" data-cat="{c['cat']}">
-          <td class="px-4 py-3 font-medium text-gray-800">{c['label']}</td>
+        <tr class="hover:bg-indigo-50 transition-colors cpt-row cursor-pointer select-none" data-cat="{c['cat']}" onclick="toggleCptArticles('{c['slug']}', this)">
+          <td class="px-4 py-3">
+            <span class="cpt-expand-icon text-gray-400 mr-2 inline-block w-3 text-xs transition-transform">▶</span>
+            <span class="font-medium text-gray-800">{c['label']}</span>
+          </td>
           <td class="px-4 py-3"><span class="inline-block {badge_cls} text-xs font-semibold px-2 py-1 rounded-full">{cat_label}</span></td>
-          <td class="px-4 py-3 text-center"><span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full">{c['publish']}</span></td>
-          <td class="px-4 py-3 text-center"><span class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full">{c['draft']}</span></td>
+          <td class="px-4 py-3 text-center">
+            <a href="https://law-bright.com/wp-admin/edit.php?post_type={wp_post_type}&post_status=publish" target="_blank" onclick="event.stopPropagation()" class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-1 rounded-full hover:bg-green-200 transition-colors" title="WP管理で公開記事を見る">{c['publish']}</a>
+          </td>
+          <td class="px-4 py-3 text-center">
+            <a href="https://law-bright.com/wp-admin/edit.php?post_type={wp_post_type}&post_status=draft" target="_blank" onclick="event.stopPropagation()" class="inline-block bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded-full hover:bg-yellow-200 transition-colors" title="WP管理で下書きを見る">{c['draft']}</a>
+          </td>
           <td class="px-4 py-3 text-sm text-gray-600 w-40">{bar}</td>
           <td class="px-4 py-3 text-center text-xs text-gray-500">{pct}%</td>
+        </tr>
+        <tr class="cpt-expand-row" id="cpt-expand-row-{c['slug']}" data-cat="{c['cat']}" data-open="false" style="display:none">
+          <td colspan="6" class="px-0 py-0 border-l-4 border-indigo-400">
+            <div id="cpt-expand-{c['slug']}" class="px-8 py-4 bg-indigo-50 text-xs"></div>
+          </td>
         </tr>"""
 
-    # 上位ページ行
+    # 上位ページ行（WP編集リンク付き）
     page_rows = ""
     for i, p in enumerate(gsc_pages[:20], 1):
         url = p["page"]
         short = url.replace("https://law-bright.com", "")
+        slug_last = url.rstrip("/").split("/")[-1]
+        wp_search_url = f"https://law-bright.com/wp-admin/edit.php?s={slug_last}&post_type=any"
         ctr_pct = round(p["ctr"] * 100, 2)
         ctr_color = "text-green-700" if p["ctr"] > 0.015 else ("text-yellow-700" if p["ctr"] > 0.01 else "text-red-600")
         pos_color = "text-green-700 font-bold" if p["position"] <= 5 else ("text-yellow-700" if p["position"] <= 10 else "text-red-600")
@@ -269,12 +284,18 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
         page_rows += f"""
         <tr class="hover:bg-gray-50 transition-colors page-row" data-cat="{pc}">
           <td class="px-3 py-2 text-center text-gray-400 text-sm">#{i}</td>
-          <td class="px-3 py-2 text-xs text-blue-700 font-mono"><a href="{url}" target="_blank" class="hover:underline">{short}</a></td>
+          <td class="px-3 py-2 text-xs font-mono">
+            <a href="{url}" target="_blank" class="text-blue-700 hover:underline">{short}</a>
+          </td>
           <td class="px-3 py-2"><span class="inline-block {badge_cls} text-xs font-semibold px-2 py-1 rounded-full">{cat_label}</span></td>
           <td class="px-3 py-2 text-center font-semibold">{p['clicks']:,}</td>
           <td class="px-3 py-2 text-center text-gray-500">{p['impressions']:,}</td>
           <td class="px-3 py-2 text-center {ctr_color}">{ctr_pct}%</td>
           <td class="px-3 py-2 text-center {pos_color}">{p['position']}</td>
+          <td class="px-3 py-2 text-center whitespace-nowrap">
+            <a href="{url}" target="_blank" class="text-blue-600 hover:text-blue-800 text-xs mr-2" title="記事を表示">↗ 表示</a>
+            <a href="{wp_search_url}" target="_blank" class="text-orange-600 hover:text-orange-800 text-xs" title="WP管理で検索">✏️ 編集</a>
+          </td>
         </tr>"""
 
     # タスク行
@@ -442,10 +463,10 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
           <table class="w-full text-sm">
             <thead>
               <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
-                <th class="px-4 py-3 text-left">カテゴリ</th>
+                <th class="px-4 py-3 text-left">カテゴリ <span class="normal-case text-gray-400 font-normal">（クリックで記事一覧）</span></th>
                 <th class="px-4 py-3 text-left">ジャンル</th>
-                <th class="px-4 py-3 text-center">公開</th>
-                <th class="px-4 py-3 text-center">下書き</th>
+                <th class="px-4 py-3 text-center">公開 <span class="normal-case text-gray-400 font-normal">↗WP</span></th>
+                <th class="px-4 py-3 text-center">下書き <span class="normal-case text-gray-400 font-normal">↗WP</span></th>
                 <th class="px-4 py-3 text-left">進捗</th>
                 <th class="px-4 py-3 text-center">公開率</th>
               </tr>
@@ -481,6 +502,7 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages):
                 <th class="px-3 py-2 text-center">表示回数</th>
                 <th class="px-3 py-2 text-center">CTR</th>
                 <th class="px-3 py-2 text-center">順位</th>
+                <th class="px-3 py-2 text-center">操作</th>
               </tr>
             </thead>
             <tbody id="pages-tbody" class="divide-y divide-gray-100">{page_rows}</tbody>
@@ -696,12 +718,18 @@ function setFilter(cat, btn) {{
 function applyFilter() {{
   const cat = currentFilter;
 
-  // 記事ステータス
+  // 記事ステータス（メイン行）
   let cptVisible = 0;
   document.querySelectorAll('.cpt-row').forEach(row => {{
     const show = cat === 'all' || row.dataset.cat === cat;
     row.style.display = show ? '' : 'none';
     if (show) cptVisible++;
+  }});
+  // 記事ステータス（展開行）- 開いているものだけ表示
+  document.querySelectorAll('.cpt-expand-row').forEach(row => {{
+    const matchesCat = cat === 'all' || row.dataset.cat === cat;
+    const isOpen = row.dataset.open === 'true';
+    row.style.display = (matchesCat && isOpen) ? '' : 'none';
   }});
   document.getElementById('articles-empty').classList.toggle('hidden', cptVisible > 0);
 
@@ -740,6 +768,73 @@ function switchTab(name, btn) {{
   document.getElementById('tab-' + name).classList.add('active');
   if (btn) btn.classList.add('active');
   applyFilter();  // タブ切替時にも現在のフィルターを再適用
+}}
+
+// ── 記事一覧展開（WP REST API） ──────────────────────────────────────
+function toggleCptArticles(slug, rowEl) {{
+  const expandRow = document.getElementById('cpt-expand-row-' + slug);
+  const container = document.getElementById('cpt-expand-' + slug);
+  const icon = rowEl.querySelector('.cpt-expand-icon');
+
+  if (expandRow.dataset.open === 'true') {{
+    expandRow.dataset.open = 'false';
+    expandRow.style.display = 'none';
+    if (icon) icon.textContent = '▶';
+    return;
+  }}
+
+  if (icon) icon.textContent = '⏳';
+
+  (async () => {{
+    try {{
+      const base = 'https://law-bright.com/wp-json/wp/v2/';
+      const pubUrl = base + slug + '?per_page=30&orderby=modified&order=desc&_fields=id,title,link,modified,status';
+      const dftUrl = base + slug + '?per_page=10&orderby=modified&order=desc&_fields=id,title,link,modified,status&status=draft';
+
+      const [pubRes, dftRes] = await Promise.allSettled([fetch(pubUrl), fetch(dftUrl)]);
+      const pubList = pubRes.status === 'fulfilled' && pubRes.value.ok ? await pubRes.value.json() : [];
+      const dftList = dftRes.status === 'fulfilled' && dftRes.value.ok ? await dftRes.value.json() : [];
+
+      const makeRows = (items, statusLabel, rowCls) =>
+        items.map(a => `<tr class="hover:bg-indigo-100 transition-colors ${{rowCls}}">
+          <td class="py-1.5 pr-3 max-w-xs">
+            ${{statusLabel === '公開' ? `<a href="${{a.link}}" target="_blank" class="text-blue-700 hover:underline">${{a.title.rendered}}</a>` : `<span class="text-gray-600">${{a.title.rendered}}</span>`}}
+          </td>
+          <td class="py-1.5 pr-2 text-center text-gray-400 whitespace-nowrap">${{(a.modified||'').slice(0,10)}}</td>
+          <td class="py-1.5 text-center whitespace-nowrap">
+            <span class="${{statusLabel === '公開' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}} text-xs px-1.5 py-0.5 rounded-full mr-1">${{statusLabel}}</span>
+            ${{statusLabel === '公開' ? `<a href="${{a.link}}" target="_blank" class="text-blue-500 hover:underline mr-1" title="記事を表示">↗</a>` : ''}}
+            <a href="https://law-bright.com/wp-admin/post.php?post=${{a.id}}&action=edit" target="_blank" class="text-orange-500 hover:underline" title="WPで編集">✏️</a>
+          </td>
+        </tr>`).join('');
+
+      if (pubList.length === 0 && dftList.length === 0) {{
+        container.innerHTML = '<div class="text-gray-400 py-2 text-center">記事を取得できませんでした（WP REST API 非公開CPTの可能性）</div>';
+      }} else {{
+        container.innerHTML =
+          '<table class="w-full text-xs">' +
+          '<thead><tr class="text-gray-500 border-b border-indigo-200 text-left">' +
+          '<th class="py-1 pr-3 font-semibold">タイトル</th>' +
+          '<th class="py-1 pr-2 text-center font-semibold w-24">更新日</th>' +
+          '<th class="py-1 text-center font-semibold w-28">操作</th>' +
+          '</tr></thead>' +
+          '<tbody class="divide-y divide-indigo-100">' +
+          makeRows(pubList, '公開', '') +
+          makeRows(dftList, '下書き', 'opacity-70') +
+          '</tbody></table>' +
+          '<div class="text-right text-gray-400 mt-1.5">公開 ' + pubList.length + '件 · 下書き ' + dftList.length + '件（更新日順）</div>';
+      }}
+
+      expandRow.dataset.open = 'true';
+      expandRow.style.display = '';
+      if (icon) icon.textContent = '▼';
+    }} catch(e) {{
+      container.innerHTML = '<div class="text-red-500 py-2">取得エラー: ' + e.message + '</div>';
+      expandRow.dataset.open = 'true';
+      expandRow.style.display = '';
+      if (icon) icon.textContent = '❌';
+    }}
+  }})();
 }}
 
 // ── サイトマップビューア（西田紗知さん作成） ──────────────────────────
