@@ -45,7 +45,7 @@ CPTS = [
     {"slug": "litigation",    "label": "訴訟",         "color": "#84cc16", "cat": "komon"},
     {"slug": "dispute",       "label": "紛争解決",     "color": "#60a5fa", "cat": "komon"},
     # 労災
-    {"slug": "labor",         "label": "労災",         "color": "#ef4444", "cat": "rosai"},
+    {"slug": "labor-accident", "label": "労災",         "color": "#ef4444", "cat": "rosai"},
     # 交通事故
     {"slug": "kotuziko",      "label": "交通事故",     "color": "#f59e0b", "cat": "kotsu"},
     # その他
