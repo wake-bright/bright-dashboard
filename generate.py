@@ -589,6 +589,45 @@ def fetch_all_articles_wp() -> list:
     return all_articles
 
 
+def fetch_draft_articles_wp() -> list:
+    """WP REST API から記事管理対象CPTの下書き記事を全件取得"""
+    all_drafts = []
+    for info in ARTICLE_CPTS:
+        slug, count = info["slug"], 0
+        page = 1
+        while True:
+            try:
+                r = requests.get(
+                    f"{WP_BASE}/wp-json/wp/v2/{slug}",
+                    params={"status": "draft", "per_page": 100, "page": page,
+                            "_fields": "id,title,link,date,modified,featured_media"},
+                    auth=AUTH, timeout=30,
+                )
+                if r.status_code in (400, 404): break
+                r.raise_for_status()
+                data = r.json()
+                if not data: break
+                for post in data:
+                    all_drafts.append({
+                        "id":       post["id"],
+                        "title":    post["title"]["rendered"],
+                        "modified": post.get("modified", post["date"])[:10],
+                        "created":  post["date"][:10],
+                        "eyecatch": post.get("featured_media", 0) != 0,
+                        "cpt":      slug,
+                        "dai":      info["dai"],
+                        "sho":      get_sho_cat(post, slug),
+                    })
+                count += len(data)
+                if len(data) < 100: break
+                page += 1
+            except Exception as e:
+                print(f"    WP 下書きエラー ({slug} p{page}): {e}")
+                break
+        print(f"  [{info['dai']:5s}] {slug} draft: {count}本")
+    return all_drafts
+
+
 def fetch_gsc_for_articles(days: int = 30):
     """記事管理用 GSC データ（当月・前月・上位クエリ）を全ページ分取得"""
     if not HAS_GOOGLE:
@@ -852,7 +891,8 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
                   inquiry_data=None,
                   ga4_ts_1y=None, gsc_ts_1y=None,
                   ga4_ts_2y=None, ga4_ts_3y=None,
-                  ga4_monthly=None, gsc_monthly=None):
+                  ga4_monthly=None, gsc_monthly=None,
+                  draft_articles=None):
     total_pub   = sum(c["publish"] for c in cpt_data)
     total_draft = sum(c["draft"]   for c in cpt_data)
 
@@ -1011,6 +1051,8 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
   .filter-btn.active-kotsu {{ background: #f59e0b; color: white; }}
   .filter-btn.active-other {{ background: #64748b; color: white; }}
   .am-filter-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
+  .amview-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
+  .dr-filter-btn.active {{ background: #d97706; color: white; border-color: #d97706; }}
   .period-btn {{ transition: all .12s; }}
   .period-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
   .cmp-btn {{ transition: all .12s; }}
@@ -1225,62 +1267,127 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
     <!-- 記事管理タブ -->
     <div id="tab-artmgr" class="tab-content">
       <div class="p-4">
-        <!-- サマリ行 -->
-        <div id="am-summary" class="grid grid-cols-4 gap-3 mb-4 text-center">
-          <div class="bg-white rounded-lg border border-gray-100 shadow-sm p-3">
-            <div class="text-xs text-gray-500">総記事数</div>
-            <div class="text-xl font-bold text-gray-800" id="am-total">—</div>
+
+        <!-- 公開済/下書き ビュー切り替え -->
+        <div class="flex gap-2 mb-4">
+          <button id="amview-pub" class="amview-btn active px-4 py-1.5 rounded-full text-xs font-bold border border-green-400 text-green-700 bg-green-50" onclick="setArtView('pub',this)">📰 公開済</button>
+          <button id="amview-draft" class="amview-btn px-4 py-1.5 rounded-full text-xs font-bold border border-yellow-400 text-yellow-700 bg-yellow-50" onclick="setArtView('draft',this)">📝 下書き <span id="draft-count-badge" class="ml-1 bg-yellow-400 text-white rounded-full px-1.5 py-0.5 text-xs"></span></button>
+        </div>
+
+        <!-- 公開済ビュー -->
+        <div id="amview-pub-content">
+          <!-- サマリ行 -->
+          <div id="am-summary" class="grid grid-cols-4 gap-3 mb-4 text-center">
+            <div class="bg-white rounded-lg border border-gray-100 shadow-sm p-3">
+              <div class="text-xs text-gray-500">総記事数</div>
+              <div class="text-xl font-bold text-gray-800" id="am-total">—</div>
+            </div>
+            <div class="bg-indigo-50 rounded-lg border border-indigo-100 p-3 cursor-pointer hover:bg-indigo-100 transition-colors" onclick="setArtFilter('top10',this)">
+              <div class="text-xs text-indigo-600">🔝 上位10位圏内</div>
+              <div class="text-xl font-bold text-indigo-700" id="am-top10">—</div>
+            </div>
+            <div class="bg-yellow-50 rounded-lg border border-yellow-100 p-3 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="setArtFilter('rewrite',this)">
+              <div class="text-xs text-yellow-600">✏️ リライト推奨</div>
+              <div class="text-xl font-bold text-yellow-700" id="am-rewrite">—</div>
+            </div>
+            <div class="bg-red-50 rounded-lg border border-red-100 p-3 cursor-pointer hover:bg-red-100 transition-colors" onclick="setArtFilter('drop',this)">
+              <div class="text-xs text-red-600">💥 急落記事</div>
+              <div class="text-xl font-bold text-red-700" id="am-drop">—</div>
+            </div>
           </div>
-          <div class="bg-indigo-50 rounded-lg border border-indigo-100 p-3 cursor-pointer hover:bg-indigo-100 transition-colors" onclick="setArtFilter('top10',this)">
-            <div class="text-xs text-indigo-600">🔝 上位10位圏内</div>
-            <div class="text-xl font-bold text-indigo-700" id="am-top10">—</div>
+
+          <!-- フィルター行 -->
+          <div class="flex flex-wrap items-center gap-2 mb-3">
+            <span class="text-xs text-gray-500">フィルター：</span>
+            <button class="am-filter-btn active text-xs px-3 py-1 rounded-full border border-gray-300 font-semibold" onclick="setArtFilter('all',this)">全て</button>
+            <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-indigo-300 text-indigo-700 font-semibold" onclick="setArtFilter('top10',this)">🔝 上位10位</button>
+            <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-yellow-300 text-yellow-700 font-semibold" onclick="setArtFilter('rewrite',this)">✏️ リライト推奨</button>
+            <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-green-300 text-green-700 font-semibold" onclick="setArtFilter('rise',this)">🚀 急上昇</button>
+            <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-red-300 text-red-700 font-semibold" onclick="setArtFilter('drop',this)">💥 急落</button>
+            <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-gray-300 text-gray-600 font-semibold" onclick="setArtFilter('noimg',this)">🖼️ アイキャッチなし</button>
+            <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-orange-300 text-orange-700 font-semibold" onclick="setArtFilter('new',this)">🆕 新規流入</button>
+            <input type="text" id="am-search" placeholder="タイトル・クエリで絞り込み..." oninput="renderArtTable()"
+              class="ml-auto border border-gray-200 rounded-lg px-3 py-1.5 text-xs w-52 focus:outline-none focus:border-indigo-400">
           </div>
-          <div class="bg-yellow-50 rounded-lg border border-yellow-100 p-3 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="setArtFilter('rewrite',this)">
-            <div class="text-xs text-yellow-600">✏️ リライト推奨</div>
-            <div class="text-xl font-bold text-yellow-700" id="am-rewrite">—</div>
-          </div>
-          <div class="bg-red-50 rounded-lg border border-red-100 p-3 cursor-pointer hover:bg-red-100 transition-colors" onclick="setArtFilter('drop',this)">
-            <div class="text-xs text-red-600">💥 急落記事</div>
-            <div class="text-xl font-bold text-red-700" id="am-drop">—</div>
+
+          <!-- 件数表示 -->
+          <div class="text-xs text-gray-400 mb-2" id="am-count">読み込み中...</div>
+
+          <!-- テーブル -->
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="bg-gray-50 text-gray-500 uppercase tracking-wide select-none">
+                  <th class="px-3 py-2 text-left cursor-pointer hover:bg-gray-100" onclick="toggleArtSort('title')">タイトル <span id="s-title"></span></th>
+                  <th class="px-3 py-2 text-left cursor-pointer hover:bg-gray-100 w-20" onclick="toggleArtSort('sho')">小カテゴリ <span id="s-sho"></span></th>
+                  <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-20" onclick="toggleArtSort('date')">公開日 <span id="s-date"></span></th>
+                  <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-14" onclick="toggleArtSort('eyecatch')">👁 <span id="s-eyecatch"></span></th>
+                  <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-14" onclick="toggleArtSort('position')">順位 <span id="s-position"></span></th>
+                  <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-16" onclick="toggleArtSort('clicks')">クリック <span id="s-clicks"></span></th>
+                  <th class="px-3 py-2 text-left w-36">上位クエリ</th>
+                  <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-20" onclick="toggleArtSort('status')">変化 <span id="s-status"></span></th>
+                  <th class="px-3 py-2 text-center w-16">操作</th>
+                </tr>
+              </thead>
+              <tbody id="am-tbody" class="divide-y divide-gray-100"></tbody>
+            </table>
           </div>
         </div>
 
-        <!-- フィルター行 -->
-        <div class="flex flex-wrap items-center gap-2 mb-3">
-          <span class="text-xs text-gray-500">フィルター：</span>
-          <button class="am-filter-btn active text-xs px-3 py-1 rounded-full border border-gray-300 font-semibold" onclick="setArtFilter('all',this)">全て</button>
-          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-indigo-300 text-indigo-700 font-semibold" onclick="setArtFilter('top10',this)">🔝 上位10位</button>
-          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-yellow-300 text-yellow-700 font-semibold" onclick="setArtFilter('rewrite',this)">✏️ リライト推奨</button>
-          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-green-300 text-green-700 font-semibold" onclick="setArtFilter('rise',this)">🚀 急上昇</button>
-          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-red-300 text-red-700 font-semibold" onclick="setArtFilter('drop',this)">💥 急落</button>
-          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-gray-300 text-gray-600 font-semibold" onclick="setArtFilter('noimg',this)">🖼️ アイキャッチなし</button>
-          <button class="am-filter-btn text-xs px-3 py-1 rounded-full border border-orange-300 text-orange-700 font-semibold" onclick="setArtFilter('new',this)">🆕 新規流入</button>
-          <input type="text" id="am-search" placeholder="タイトル・クエリで絞り込み..." oninput="renderArtTable()"
-            class="ml-auto border border-gray-200 rounded-lg px-3 py-1.5 text-xs w-52 focus:outline-none focus:border-indigo-400">
+        <!-- 下書きビュー -->
+        <div id="amview-draft-content" class="hidden">
+          <!-- 下書きサマリ -->
+          <div class="grid grid-cols-4 gap-3 mb-4 text-center" id="draft-summary">
+            <div class="bg-yellow-50 rounded-lg border border-yellow-100 p-3">
+              <div class="text-xs text-yellow-700">下書き合計</div>
+              <div class="text-xl font-bold text-yellow-800" id="dr-total">—</div>
+            </div>
+            <div class="bg-red-50 rounded-lg border border-red-100 p-3">
+              <div class="text-xs text-red-600">🖼️ アイキャッチなし</div>
+              <div class="text-xl font-bold text-red-700" id="dr-noimg">—</div>
+            </div>
+            <div class="bg-amber-50 rounded-lg border border-amber-100 p-3">
+              <div class="text-xs text-amber-700">🚗 交通事故</div>
+              <div class="text-xl font-bold text-amber-800" id="dr-kotsu">—</div>
+            </div>
+            <div class="bg-orange-50 rounded-lg border border-orange-100 p-3">
+              <div class="text-xs text-orange-700">⚠️ 労災</div>
+              <div class="text-xl font-bold text-orange-800" id="dr-rosai">—</div>
+            </div>
+          </div>
+
+          <!-- 下書きフィルター -->
+          <div class="flex flex-wrap items-center gap-2 mb-3">
+            <span class="text-xs text-gray-500">フィルター：</span>
+            <button class="dr-filter-btn active text-xs px-3 py-1 rounded-full border border-gray-300 font-semibold" onclick="setDraftFilter('all',this)">全て</button>
+            <button class="dr-filter-btn text-xs px-3 py-1 rounded-full border border-red-300 text-red-700 font-semibold" onclick="setDraftFilter('noimg',this)">🖼️ アイキャッチなし</button>
+            <button class="dr-filter-btn text-xs px-3 py-1 rounded-full border border-amber-300 text-amber-700 font-semibold" onclick="setDraftFilter('kotsu',this)">🚗 交通事故</button>
+            <button class="dr-filter-btn text-xs px-3 py-1 rounded-full border border-red-300 text-red-700 font-semibold" onclick="setDraftFilter('rosai',this)">⚠️ 労災</button>
+            <button class="dr-filter-btn text-xs px-3 py-1 rounded-full border border-emerald-300 text-emerald-700 font-semibold" onclick="setDraftFilter('komon',this)">🏢 企業法務</button>
+            <input type="text" id="dr-search" placeholder="タイトルで絞り込み..." oninput="renderDraftTable()"
+              class="ml-auto border border-gray-200 rounded-lg px-3 py-1.5 text-xs w-52 focus:outline-none focus:border-yellow-400">
+          </div>
+          <div class="text-xs text-gray-400 mb-2" id="dr-count"></div>
+
+          <!-- 下書きテーブル -->
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="bg-yellow-50 text-gray-500 uppercase tracking-wide select-none">
+                  <th class="px-3 py-2 text-left cursor-pointer hover:bg-yellow-100" onclick="toggleDraftSort('title')">タイトル <span id="ds-title"></span></th>
+                  <th class="px-3 py-2 text-left w-20 cursor-pointer hover:bg-yellow-100" onclick="toggleDraftSort('sho')">小カテゴリ <span id="ds-sho"></span></th>
+                  <th class="px-3 py-2 text-center w-16">ジャンル</th>
+                  <th class="px-3 py-2 text-center w-20 cursor-pointer hover:bg-yellow-100" onclick="toggleDraftSort('modified')">最終更新 <span id="ds-modified"></span></th>
+                  <th class="px-3 py-2 text-center w-20 cursor-pointer hover:bg-yellow-100" onclick="toggleDraftSort('created')">作成日 <span id="ds-created"></span></th>
+                  <th class="px-3 py-2 text-center w-14 cursor-pointer hover:bg-yellow-100" onclick="toggleDraftSort('eyecatch')">👁 <span id="ds-eyecatch"></span></th>
+                  <th class="px-3 py-2 text-center w-16">WP編集</th>
+                </tr>
+              </thead>
+              <tbody id="dr-tbody" class="divide-y divide-gray-100"></tbody>
+            </table>
+          </div>
         </div>
 
-        <!-- 件数表示 -->
-        <div class="text-xs text-gray-400 mb-2" id="am-count">読み込み中...</div>
-
-        <!-- テーブル -->
-        <div class="overflow-x-auto">
-          <table class="w-full text-xs">
-            <thead>
-              <tr class="bg-gray-50 text-gray-500 uppercase tracking-wide select-none">
-                <th class="px-3 py-2 text-left cursor-pointer hover:bg-gray-100" onclick="toggleArtSort('title')">タイトル <span id="s-title"></span></th>
-                <th class="px-3 py-2 text-left cursor-pointer hover:bg-gray-100 w-20" onclick="toggleArtSort('sho')">小カテゴリ <span id="s-sho"></span></th>
-                <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-20" onclick="toggleArtSort('date')">公開日 <span id="s-date"></span></th>
-                <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-14" onclick="toggleArtSort('eyecatch')">👁 <span id="s-eyecatch"></span></th>
-                <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-14" onclick="toggleArtSort('position')">順位 <span id="s-position"></span></th>
-                <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-16" onclick="toggleArtSort('clicks')">クリック <span id="s-clicks"></span></th>
-                <th class="px-3 py-2 text-left w-36">上位クエリ</th>
-                <th class="px-3 py-2 text-center cursor-pointer hover:bg-gray-100 w-20" onclick="toggleArtSort('status')">変化 <span id="s-status"></span></th>
-                <th class="px-3 py-2 text-center w-16">操作</th>
-              </tr>
-            </thead>
-            <tbody id="am-tbody" class="divide-y divide-gray-100"></tbody>
-          </table>
-        </div>
       </div>
     </div>
 
@@ -1494,6 +1601,7 @@ const gscImps     = {json.dumps(gsc_imps)};
 const GA4_TOTAL   = {ga4_sessions};
 const catMetrics  = {cat_metrics_js};
 const ARTICLES    = {json.dumps(articles_data or [])};
+const DRAFTS      = {json.dumps(draft_articles or [])};
 const GA4_TS      = {json.dumps(ga4_ts_cat  or {})};
 const GSC_TS      = {json.dumps(gsc_ts_cat  or {})};
 const GA4_TS_PREV = {json.dumps(ga4_ts_prev or {})};
@@ -2249,7 +2357,117 @@ function renderArtTable() {{
   setCard('am-drop',    ARTICLES.filter(a => (a.status||'').includes('急落')).length);
 }}
 
-document.addEventListener('DOMContentLoaded', renderArtTable);
+document.addEventListener('DOMContentLoaded', () => {{
+  renderArtTable();
+  renderDraftTable();
+  // バッジ更新
+  const badge = document.getElementById('draft-count-badge');
+  if (badge) badge.textContent = DRAFTS.length;
+}});
+
+// ── 下書きビュー ──────────────────────────────────────────
+let artView     = 'pub'; // 'pub' | 'draft'
+let draftFilter = 'all';
+let draftSortCol = 'modified';
+let draftSortAsc = false;
+
+function setArtView(view, btn) {{
+  artView = view;
+  document.querySelectorAll('.amview-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('amview-pub-content').classList.toggle('hidden', view !== 'pub');
+  document.getElementById('amview-draft-content').classList.toggle('hidden', view !== 'draft');
+}}
+
+function setDraftFilter(f, btn) {{
+  draftFilter = f;
+  document.querySelectorAll('.dr-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderDraftTable();
+}}
+
+function toggleDraftSort(col) {{
+  if (draftSortCol === col) draftSortAsc = !draftSortAsc;
+  else {{ draftSortCol = col; draftSortAsc = false; }}
+  ['title','sho','modified','created','eyecatch'].forEach(c => {{
+    const el = document.getElementById('ds-' + c);
+    if (el) el.textContent = '';
+  }});
+  const el = document.getElementById('ds-' + col);
+  if (el) el.textContent = draftSortAsc ? ' ▲' : ' ▼';
+  renderDraftTable();
+}}
+
+function renderDraftTable() {{
+  const tbody  = document.getElementById('dr-tbody');
+  if (!tbody) return;
+  const cat    = currentFilter;
+  const search = (document.getElementById('dr-search')?.value || '').toLowerCase();
+  const DAI_MAP = {{ '労災':'rosai', '交通事故':'kotsu', '企業法務':'komon' }};
+
+  let items = DRAFTS.filter(d => {{
+    const dc = DAI_MAP[d.dai] || 'other';
+    if (cat !== 'all' && dc !== cat) return false;
+    if (draftFilter === 'noimg'  && d.eyecatch)   return false;
+    if (draftFilter === 'kotsu'  && dc !== 'kotsu')  return false;
+    if (draftFilter === 'rosai'  && dc !== 'rosai')  return false;
+    if (draftFilter === 'komon'  && dc !== 'komon')  return false;
+    if (search && !(d.title||'').toLowerCase().includes(search)) return false;
+    return true;
+  }});
+
+  items.sort((a, b) => {{
+    let va, vb;
+    if      (draftSortCol === 'title')    {{ va = a.title   ||''; vb = b.title   ||''; }}
+    else if (draftSortCol === 'sho')      {{ va = a.sho     ||''; vb = b.sho     ||''; }}
+    else if (draftSortCol === 'modified') {{ va = a.modified||''; vb = b.modified||''; }}
+    else if (draftSortCol === 'created')  {{ va = a.created ||''; vb = b.created ||''; }}
+    else if (draftSortCol === 'eyecatch') {{ va = a.eyecatch?1:0; vb = b.eyecatch?1:0; }}
+    else {{ va = ''; vb = ''; }}
+    if (va < vb) return draftSortAsc ? -1 : 1;
+    if (va > vb) return draftSortAsc ? 1 : -1;
+    return 0;
+  }});
+
+  // サマリ更新
+  const setV = (id, v) => {{ const el=document.getElementById(id); if(el) el.textContent=v; }};
+  setV('dr-total', DRAFTS.length.toLocaleString('ja-JP'));
+  setV('dr-noimg', DRAFTS.filter(d => !d.eyecatch).length);
+  setV('dr-kotsu', DRAFTS.filter(d => d.dai === '交通事故').length);
+  setV('dr-rosai', DRAFTS.filter(d => d.dai === '労災').length);
+
+  const countEl = document.getElementById('dr-count');
+  if (countEl) countEl.textContent = items.length.toLocaleString('ja-JP') + ' 件 / 全 ' + DRAFTS.length.toLocaleString('ja-JP') + ' 件';
+
+  const DAI_STYLE = {{
+    '労災':    'bg-red-100 text-red-700',
+    '交通事故':'bg-amber-100 text-amber-700',
+    '企業法務':'bg-emerald-100 text-emerald-700',
+  }};
+
+  tbody.innerHTML = items.map(d => {{
+    const eye   = d.eyecatch ? '✅' : '<span class="text-red-400 font-bold">✗</span>';
+    const wpEd  = 'https://law-bright.com/wp-admin/post.php?post=' + d.id + '&action=edit';
+    const dstyle = DAI_STYLE[d.dai] || 'bg-gray-100 text-gray-600';
+    const mod   = d.modified || '—';
+    const modCls = !d.modified ? '' :
+      d.modified >= new Date(Date.now()-7*86400000).toISOString().slice(0,10)
+        ? 'text-green-700 font-semibold' : '';
+    return `<tr class="hover:bg-yellow-50 transition-colors">
+      <td class="px-3 py-2 max-w-xs">
+        <a href="${{wpEd}}" target="_blank" class="text-gray-800 hover:text-indigo-700 hover:underline">${{d.title}}</a>
+      </td>
+      <td class="px-3 py-2 text-gray-500 text-xs">${{d.sho || '—'}}</td>
+      <td class="px-3 py-2 text-center"><span class="text-xs px-2 py-0.5 rounded-full ${{dstyle}}">${{d.dai}}</span></td>
+      <td class="px-3 py-2 text-center text-xs ${{modCls}}">${{mod}}</td>
+      <td class="px-3 py-2 text-center text-xs text-gray-400">${{d.created || '—'}}</td>
+      <td class="px-3 py-2 text-center">${{eye}}</td>
+      <td class="px-3 py-2 text-center">
+        <a href="${{wpEd}}" target="_blank" class="text-orange-500 text-xs hover:underline font-semibold">✏️ 編集</a>
+      </td>
+    </tr>`;
+  }}).join('');
+}}
 
 function smSortTable(col) {{
   if (smSortCol === col) smSortAsc = !smSortAsc;
@@ -2536,6 +2754,7 @@ if __name__ == "__main__":
     # 記事管理データ取得
     print("⏳ 記事管理データ取得中...")
     wp_articles = fetch_all_articles_wp()
+    draft_articles = fetch_draft_articles_wp()
     gsc_curr, gsc_prev, top_queries = fetch_gsc_for_articles(days=30)
     articles_data = []
     for art in wp_articles:
@@ -2555,13 +2774,15 @@ if __name__ == "__main__":
     print(f"  記事管理: {len(articles_data)}本 マージ完了")
 
     print("⏳ HTML生成中...")
+    print(f"  下書き記事: {len(draft_articles)}本")
     html = generate_html(cpt_data, GA4_DATA, GSC_DAILY, GSC_PAGES, articles_data,
                          GA4_CAT_LIVE, GA4_TS_LIVE, GSC_TS_LIVE,
                          GA4_TS_PREV, GSC_TS_PREV,
                          inquiry_data=inquiry_data,
                          ga4_ts_1y=GA4_TS_1Y, gsc_ts_1y=GSC_TS_1Y,
                          ga4_ts_2y=GA4_TS_2Y, ga4_ts_3y=GA4_TS_3Y,
-                         ga4_monthly=GA4_MONTHLY, gsc_monthly=GSC_MONTHLY)
+                         ga4_monthly=GA4_MONTHLY, gsc_monthly=GSC_MONTHLY,
+                         draft_articles=draft_articles)
     out_path = Path(__file__).parent / "docs" / "index.html"
     out_path.parent.mkdir(exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
