@@ -1075,6 +1075,8 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
   .sm-cpt-page     {{ color: #1d4ed8; }}
   .sm-cpt-other    {{ color: #475569; }}
   .sm-hl {{ background: #fef08a; border-radius: 2px; }}
+  .sm-url-box::-webkit-scrollbar {{ width: 4px; }}
+  .sm-url-box::-webkit-scrollbar-thumb {{ background: #cbd5e1; border-radius: 2px; }}
   .period-btn {{ transition: all .12s; }}
   .period-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
   .cmp-btn {{ transition: all .12s; }}
@@ -2363,38 +2365,70 @@ function smHighlight(text, q) {{
   return text.slice(0, i) + '<mark class="sm-hl">' + text.slice(i, i + q.length) + '</mark>' + text.slice(i + q.length);
 }}
 
+// 直接の子URL（記事リスト）を折りたたみボックスで表示
+function smRenderUrlBox(urls, cpt, q) {{
+  if (!urls || urls.length === 0) return '';
+  const MAX_SHOW = 50;
+  const shown = urls.slice(0, MAX_SHOW);
+  const more = urls.length - shown.length;
+  const items = shown.map(u => {{
+    const slug = u.replace(/\/$/, '').split('/').pop();
+    const hl = smHighlight(slug, q);
+    return `<a href="${{u}}" target="_blank" class="block px-2 py-0.5 rounded hover:bg-white text-blue-600 hover:underline truncate" title="${{u}}">${{hl}}</a>`;
+  }}).join('');
+  const moreHtml = more > 0 ? `<div class="text-gray-400 px-2 py-1 text-xs">… 他 ${{more}} 件</div>` : '';
+  return `<div class="sm-url-box ml-6 mt-1 mb-2 bg-gray-50 border border-gray-200 rounded-lg p-2 max-h-48 overflow-y-auto text-xs leading-5">${{items}}${{moreHtml}}</div>`;
+}}
+
 function smRenderNodeHtml(name, node, depth, q, cptCtx) {{
   const count = smCountUrls(node);
   if (count === 0) return '';
-  const isLeaf = Object.keys(node._children || {{}}).length === 0;
   const cpt = depth === 0 ? smCptOf('/' + name) : cptCtx;
-  const style = depth === 0 ? `background:${{cpt.bg}};border-left:3px solid ${{cpt.tx}};padding-left:6px;border-radius:4px;margin:3px 0;` : '';
+  const childKeys = Object.keys(node._children || {{}}).sort();
+  const hasChildren = childKeys.length > 0;
+  const directUrls = node._urls || [];
 
-  if (isLeaf) {{
-    const href = node._urls[0] || '';
-    const hl = smHighlight(name, q);
-    return `<div class="sm-tree-node sm-leaf" style="padding-left:${{depth * 18}}px;${{style}}">
-      <span style="color:#94a3b8">└</span>
-      <a href="${{href}}" target="_blank" class="${{cpt.cls}}">${{hl}}/</a>
-    </div>`;
-  }}
-
-  const childKeys = Object.keys(node._children).sort();
-  const childHtml = childKeys.map(k => smRenderNodeHtml(k, node._children[k], depth + 1, q, cpt)).join('');
+  const outerStyle = depth === 0
+    ? `background:${{cpt.bg}};border-left:3px solid ${{cpt.tx}};border-radius:6px;margin:4px 0;padding:2px 6px 2px 6px;`
+    : '';
+  const indent = depth === 0 ? 0 : (depth - 1) * 18;
   const hl = smHighlight(name, q);
   const badgeStyle = `background:${{cpt.badge}};color:${{cpt.tx}};`;
-  const openAttr = (depth < 2 || q) ? ' open' : '';
+  const label = depth === 0 ? `${{cpt.label}}&nbsp;&nbsp;<span class="font-mono">${{hl}}/</span>` : `<span class="font-mono">${{hl}}/</span>`;
 
-  return `<div class="sm-tree-node" style="padding-left:${{depth * 18}}px">
-    <details${{openAttr}} style="${{style}}">
-      <summary>
-        <span class="sm-arrow">▶</span>
-        <span class="${{cpt.cls}} font-semibold">${{depth === 0 ? cpt.label + '&nbsp;' : ''}}${{hl}}/</span>
-        <span class="sm-badge" style="${{badgeStyle}}">${{count}}</span>
-      </summary>
-      <div>${{childHtml}}</div>
-    </details>
-  </div>`;
+  // ディレクトリノード（子あり）→ details で折りたたみ
+  if (hasChildren) {{
+    const openAttr = (depth < 1 || q) ? ' open' : '';
+    const childHtml = childKeys.map(k => smRenderNodeHtml(k, node._children[k], depth + 1, q, cpt)).join('');
+    // 同ディレクトリに直接URLもある場合はボックスで末尾に追加
+    const directBox = directUrls.length > 0 ? smRenderUrlBox(directUrls, cpt, q) : '';
+    return `<div class="sm-tree-node" style="padding-left:${{indent}}px">
+  <details${{openAttr}} style="${{outerStyle}}">
+    <summary>
+      <span class="sm-arrow">▶</span>
+      <span class="${{cpt.cls}} font-semibold">${{label}}</span>
+      <span class="sm-badge" style="${{badgeStyle}}">${{count}}</span>
+    </summary>
+    <div class="pl-4">${{childHtml}}${{directBox}}</div>
+  </details></div>`;
+  }}
+
+  // 末端ディレクトリ（子ディレクトリなし・直接URLのみ）→ 件数バッジ＋URLボックス
+  if (directUrls.length > 0) {{
+    const openAttr = q ? ' open' : '';
+    const urlBox = smRenderUrlBox(directUrls, cpt, q);
+    return `<div class="sm-tree-node" style="padding-left:${{indent}}px">
+  <details${{openAttr}} style="${{outerStyle}}">
+    <summary>
+      <span class="sm-arrow">▶</span>
+      <span class="${{cpt.cls}}">${{label}}</span>
+      <span class="sm-badge" style="${{badgeStyle}}">${{directUrls.length}} 記事</span>
+    </summary>
+    ${{urlBox}}
+  </details></div>`;
+  }}
+
+  return '';
 }}
 
 function smRenderTree() {{
