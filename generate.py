@@ -1053,6 +1053,28 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
   .am-filter-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
   .amview-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
   .dr-filter-btn.active {{ background: #d97706; color: white; border-color: #d97706; }}
+  .sm-view-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
+  /* ── サイトマップ ツリー ── */
+  .sm-tree-node {{ line-height: 1.6; }}
+  .sm-tree-node details > summary {{ cursor: pointer; list-style: none; display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 4px; }}
+  .sm-tree-node details > summary::-webkit-details-marker {{ display: none; }}
+  .sm-tree-node details > summary:hover {{ background: #f1f5f9; }}
+  .sm-tree-node details[open] > summary .sm-arrow {{ transform: rotate(90deg); }}
+  .sm-arrow {{ display: inline-block; transition: transform .15s; color: #94a3b8; font-size: 10px; width: 12px; }}
+  .sm-leaf {{ display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 4px; cursor: default; }}
+  .sm-leaf:hover {{ background: #f8fafc; }}
+  .sm-leaf a {{ color: #3b82f6; text-decoration: none; }}
+  .sm-leaf a:hover {{ text-decoration: underline; }}
+  .sm-badge {{ font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 9999px; margin-left: 4px; }}
+  .sm-cpt-rosai    {{ color: #dc2626; }}
+  .sm-cpt-kotsu    {{ color: #d97706; }}
+  .sm-cpt-komon    {{ color: #059669; }}
+  .sm-cpt-manda    {{ color: #0891b2; }}
+  .sm-cpt-emp      {{ color: #7c3aed; }}
+  .sm-cpt-bk       {{ color: #6b7280; }}
+  .sm-cpt-page     {{ color: #1d4ed8; }}
+  .sm-cpt-other    {{ color: #475569; }}
+  .sm-hl {{ background: #fef08a; border-radius: 2px; }}
   .period-btn {{ transition: all .12s; }}
   .period-btn.active {{ background: #4f46e5; color: white; border-color: #4f46e5; }}
   .cmp-btn {{ transition: all .12s; }}
@@ -1542,6 +1564,13 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
           <span id="sm-filteredCount" class="text-xs text-gray-500"></span>
         </div>
 
+        <!-- 表示切替 -->
+        <div id="sm-viewToggle" class="hidden flex gap-2 mb-3">
+          <button id="sm-viewList" class="sm-view-btn active px-3 py-1.5 text-xs font-semibold rounded-full border border-indigo-300 text-indigo-700 bg-indigo-50" onclick="smSetView('list',this)">📋 一覧</button>
+          <button id="sm-viewTree" class="sm-view-btn px-3 py-1.5 text-xs font-semibold rounded-full border border-gray-300 text-gray-600" onclick="smSetView('tree',this)">🌳 ツリー</button>
+        </div>
+
+        <!-- 一覧ビュー -->
         <div class="overflow-x-auto hidden" id="sm-tableWrap">
           <table class="w-full text-sm bg-white rounded-xl shadow-sm overflow-hidden">
             <thead>
@@ -1555,6 +1584,19 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
             </thead>
             <tbody id="sm-tableBody" class="divide-y divide-gray-100"></tbody>
           </table>
+        </div>
+
+        <!-- ツリービュー -->
+        <div id="sm-treeWrap" class="hidden">
+          <div class="flex items-center gap-3 mb-3">
+            <input type="text" id="sm-treeSearch" placeholder="URLで絞り込み..."
+              class="border border-gray-200 rounded-lg px-3 py-2 text-xs w-64 focus:outline-none focus:border-indigo-400"
+              oninput="smRenderTree()">
+            <button onclick="smExpandAll(true)"  class="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-50">全て展開</button>
+            <button onclick="smExpandAll(false)" class="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-50">全て閉じる</button>
+            <span class="text-xs text-gray-400" id="sm-treeCount"></span>
+          </div>
+          <div id="sm-tree" class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 font-mono text-xs overflow-x-auto"></div>
         </div>
       </div>
     </div>
@@ -2120,7 +2162,9 @@ const SM_PROXIES = [
   url => `https://api.codetabs.com/v1/proxy?quest=${{encodeURIComponent(url)}}`,
 ];
 let smAllRows = [];
+let smAllUrls = []; // url/sitemap の全URL一覧
 let smSortCol = -1, smSortAsc = true;
+let smView = 'list'; // 'list' | 'tree'
 
 function smSetStatus(msg, type='') {{
   const el = document.getElementById('sm-status');
@@ -2171,6 +2215,7 @@ async function smLoadSitemap() {{
     smSetStatus(`${{sitemaps.length}} 件のサブサイトマップを確認。URL数を取得中...`);
 
     smAllRows = [];
+    smAllUrls = [];
     let totalUrls = 0;
     let latestDate = '';
 
@@ -2178,20 +2223,24 @@ async function smLoadSitemap() {{
       const locEl = sitemaps[i].querySelector('loc');
       const lastmodEl = sitemaps[i].querySelector('lastmod');
       if (!locEl) continue;
-      const url = locEl.textContent.trim();
+      const smUrl = locEl.textContent.trim();
       const lastmod = lastmodEl ? lastmodEl.textContent.trim() : '';
-      const name = url.replace('https://law-bright.com/', '').replace('.xml', '');
+      const name = smUrl.replace('https://law-bright.com/', '').replace('.xml', '');
 
       let count = '-';
       try {{
-        const subDoc = await smFetchXML(url);
-        const urls = subDoc.querySelectorAll('url');
-        count = urls.length;
+        const subDoc = await smFetchXML(smUrl);
+        const urlEls = subDoc.querySelectorAll('url');
+        count = urlEls.length;
         totalUrls += count;
+        urlEls.forEach(el => {{
+          const loc = el.querySelector('loc');
+          if (loc) smAllUrls.push({{ url: loc.textContent.trim(), sitemap: name }});
+        }});
       }} catch (e) {{ count = 'エラー'; }}
 
       if (lastmod && lastmod > latestDate) latestDate = lastmod;
-      smAllRows.push({{ url, name, count, lastmod }});
+      smAllRows.push({{ url: smUrl, name, count, lastmod }});
       smSetProgress(15 + Math.round((i + 1) / sitemaps.length * 80));
       smSetStatus(`取得中... (${{i + 1}}/${{sitemaps.length}}) ${{name}}`);
       smRenderTable(smAllRows);
@@ -2204,8 +2253,10 @@ async function smLoadSitemap() {{
     document.getElementById('sm-filterBar').classList.remove('hidden');
     document.getElementById('sm-filteredCount').textContent = `${{smAllRows.length}} 件`;
     document.getElementById('sm-lastChecked').textContent = '最終取得: ' + new Date().toLocaleString('ja-JP');
+    document.getElementById('sm-viewToggle').classList.remove('hidden');
     smSetProgress(100);
     smSetStatus(`完了 — ${{smAllRows.length}} サイトマップ、合計 ${{totalUrls.toLocaleString()}} URL`, 'ok');
+    smRenderTree();
   }} catch (e) {{
     smSetStatus('取得エラー: ' + e.message, 'err');
     console.error(e);
@@ -2247,6 +2298,128 @@ function smRenderTable(rows) {{
 }}
 
 function smFilterTable() {{ smRenderTable(smAllRows); }}
+
+// ── サイトマップ ツリービュー ─────────────────────────────
+const SM_CPT_MAP = {{
+  'labor-accident':   {{ label: '⚠️ 労災',    cls: 'sm-cpt-rosai', bg: '#fef2f2', badge: '#fee2e2', tx: '#dc2626' }},
+  'kotuziko':         {{ label: '🚗 交通事故', cls: 'sm-cpt-kotsu', bg: '#fffbeb', badge: '#fde68a', tx: '#d97706' }},
+  'corporationlaw':   {{ label: '🏢 企業法務', cls: 'sm-cpt-komon', bg: '#f0fdf4', badge: '#bbf7d0', tx: '#059669' }},
+  'legaladvisor':     {{ label: '🏢 顧問',    cls: 'sm-cpt-komon', bg: '#f0fdf4', badge: '#bbf7d0', tx: '#059669' }},
+  'manda':            {{ label: '🤝 M&A',      cls: 'sm-cpt-manda', bg: '#ecfeff', badge: '#a5f3fc', tx: '#0891b2' }},
+  'employee':         {{ label: '👤 問題社員', cls: 'sm-cpt-emp',   bg: '#faf5ff', badge: '#e9d5ff', tx: '#7c3aed' }},
+  'bankruptcy':       {{ label: '🏛️ 破産・倒産', cls: 'sm-cpt-bk', bg: '#f9fafb', badge: '#e5e7eb', tx: '#6b7280' }},
+  'inheritance':      {{ label: '🏛️ 相続',    cls: 'sm-cpt-bk',   bg: '#f9fafb', badge: '#e5e7eb', tx: '#6b7280' }},
+  'page':             {{ label: '📄 固定ページ', cls: 'sm-cpt-page', bg: '#eff6ff', badge: '#bfdbfe', tx: '#1d4ed8' }},
+  'post':             {{ label: '📝 ブログ',   cls: 'sm-cpt-page', bg: '#eff6ff', badge: '#bfdbfe', tx: '#1d4ed8' }},
+  'glossary':         {{ label: '📚 用語集',   cls: 'sm-cpt-other', bg: '#f8fafc', badge: '#e2e8f0', tx: '#475569' }},
+  'download':         {{ label: '📥 資料DL',   cls: 'sm-cpt-other', bg: '#f8fafc', badge: '#e2e8f0', tx: '#475569' }},
+}};
+
+function smCptOf(path) {{
+  const seg = path.replace(/^\\//, '').split('/')[0];
+  return SM_CPT_MAP[seg] || {{ label: '📋 ' + seg, cls: 'sm-cpt-other', bg: '#f8fafc', badge: '#e2e8f0', tx: '#475569' }};
+}}
+
+function smSetView(view, btn) {{
+  smView = view;
+  document.querySelectorAll('.sm-view-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('sm-tableWrap').classList.toggle('hidden', view !== 'list');
+  document.getElementById('sm-treeWrap').classList.toggle('hidden', view !== 'tree');
+  document.getElementById('sm-filterBar').classList.toggle('hidden', view !== 'list');
+  if (view === 'tree') smRenderTree();
+}}
+
+function smBuildTree(urls, query) {{
+  const root = {{}};
+  const q = (query || '').toLowerCase();
+  let matched = 0;
+  for (const {{url}} of urls) {{
+    const path = url.replace('https://law-bright.com', '');
+    if (q && !path.toLowerCase().includes(q)) continue;
+    matched++;
+    const parts = path.replace(/^\\//, '').split('/').filter(Boolean);
+    let node = root;
+    for (let i = 0; i < parts.length; i++) {{
+      const p = parts[i];
+      if (!node[p]) node[p] = {{ _children: {{}}, _urls: [] }};
+      if (i === parts.length - 1) node[p]._urls.push(url);
+      node = node[p]._children;
+    }}
+  }}
+  return {{ tree: root, matched }};
+}}
+
+function smCountUrls(node) {{
+  let n = node._urls ? node._urls.length : 0;
+  for (const k of Object.keys(node._children || {{}})) n += smCountUrls(node._children[k]);
+  return n;
+}}
+
+function smHighlight(text, q) {{
+  if (!q) return text;
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return text;
+  return text.slice(0, i) + '<mark class="sm-hl">' + text.slice(i, i + q.length) + '</mark>' + text.slice(i + q.length);
+}}
+
+function smRenderNodeHtml(name, node, depth, q, cptCtx) {{
+  const count = smCountUrls(node);
+  if (count === 0) return '';
+  const isLeaf = Object.keys(node._children || {{}}).length === 0;
+  const cpt = depth === 0 ? smCptOf('/' + name) : cptCtx;
+  const style = depth === 0 ? `background:${{cpt.bg}};border-left:3px solid ${{cpt.tx}};padding-left:6px;border-radius:4px;margin:3px 0;` : '';
+
+  if (isLeaf) {{
+    const href = node._urls[0] || '';
+    const hl = smHighlight(name, q);
+    return `<div class="sm-tree-node sm-leaf" style="padding-left:${{depth * 18}}px;${{style}}">
+      <span style="color:#94a3b8">└</span>
+      <a href="${{href}}" target="_blank" class="${{cpt.cls}}">${{hl}}/</a>
+    </div>`;
+  }}
+
+  const childKeys = Object.keys(node._children).sort();
+  const childHtml = childKeys.map(k => smRenderNodeHtml(k, node._children[k], depth + 1, q, cpt)).join('');
+  const hl = smHighlight(name, q);
+  const badgeStyle = `background:${{cpt.badge}};color:${{cpt.tx}};`;
+  const openAttr = (depth < 2 || q) ? ' open' : '';
+
+  return `<div class="sm-tree-node" style="padding-left:${{depth * 18}}px">
+    <details${{openAttr}} style="${{style}}">
+      <summary>
+        <span class="sm-arrow">▶</span>
+        <span class="${{cpt.cls}} font-semibold">${{depth === 0 ? cpt.label + '&nbsp;' : ''}}${{hl}}/</span>
+        <span class="sm-badge" style="${{badgeStyle}}">${{count}}</span>
+      </summary>
+      <div>${{childHtml}}</div>
+    </details>
+  </div>`;
+}}
+
+function smRenderTree() {{
+  const container = document.getElementById('sm-tree');
+  if (!container || smAllUrls.length === 0) return;
+  const q = (document.getElementById('sm-treeSearch')?.value || '');
+  const {{ tree, matched }} = smBuildTree(smAllUrls, q);
+  const countEl = document.getElementById('sm-treeCount');
+  if (countEl) countEl.textContent = q ? `${{matched.toLocaleString()}} / ${{smAllUrls.length.toLocaleString()}} URL` : `${{smAllUrls.length.toLocaleString()}} URL`;
+
+  const topKeys = Object.keys(tree).sort((a, b) => {{
+    const order = ['labor-accident','kotuziko','corporationlaw','legaladvisor','manda','employee','bankruptcy','inheritance','page','post','glossary','download'];
+    const ai = order.indexOf(a), bi = order.indexOf(b);
+    if (ai < 0 && bi < 0) return a.localeCompare(b);
+    if (ai < 0) return 1; if (bi < 0) return -1;
+    return ai - bi;
+  }});
+
+  container.innerHTML = topKeys.map(k => smRenderNodeHtml(k, tree[k], 0, q, null)).join('') ||
+    '<div class="text-gray-400 py-8 text-center">該当URLなし</div>';
+}}
+
+function smExpandAll(open) {{
+  document.querySelectorAll('#sm-tree details').forEach(d => d.open = open);
+}}
 
 // ── 記事管理タブ ──────────────────────────────────────
 const DAI_CAT = {{'労災':'rosai','交通事故':'kotsu','企業法務':'komon'}};
