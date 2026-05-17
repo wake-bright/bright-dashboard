@@ -886,13 +886,64 @@ def fetch_inquiry_data():
     }
 
 
+def fetch_sitemap_for_embed() -> dict:
+    """サイトマップ全URLをPython側で取得してdictで返す（generate.py埋め込み用）"""
+    import urllib.request
+    import xml.etree.ElementTree as ET
+
+    SITEMAP_INDEX = "https://law-bright.com/sitemap.xml"
+
+    def fetch_xml(url):
+        req = urllib.request.Request(url, headers={"User-Agent": "bright-dashboard/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return ET.fromstring(r.read())
+
+    def get_ns(root):
+        tag = root.tag
+        return tag[1:tag.index("}")] if tag.startswith("{") else ""
+
+    try:
+        root = fetch_xml(SITEMAP_INDEX)
+        ns = get_ns(root)
+        prefix = f"{{{ns}}}" if ns else ""
+        sitemaps = []
+        for sm in root.findall(f"{prefix}sitemap"):
+            loc_el = sm.find(f"{prefix}loc")
+            lastmod_el = sm.find(f"{prefix}lastmod")
+            if loc_el is None:
+                continue
+            sm_url = loc_el.text.strip()
+            lastmod = lastmod_el.text.strip() if lastmod_el is not None else ""
+            name = sm_url.replace("https://law-bright.com/", "").replace(".xml", "")
+            urls = []
+            try:
+                sub_root = fetch_xml(sm_url)
+                sub_ns = get_ns(sub_root)
+                sub_prefix = f"{{{sub_ns}}}" if sub_ns else ""
+                for url_el in sub_root.findall(f"{sub_prefix}url"):
+                    loc = url_el.find(f"{sub_prefix}loc")
+                    if loc is not None:
+                        urls.append(loc.text.strip())
+            except Exception as e:
+                print(f"  [{name}] サブサイトマップ取得エラー: {e}")
+            sitemaps.append({"name": name, "url": sm_url, "count": len(urls), "lastmod": lastmod, "urls": urls})
+            print(f"  サイトマップ: {name} ({len(urls)} URLs)")
+        total = sum(s["count"] for s in sitemaps)
+        print(f"  サイトマップ合計: {total:,} URLs")
+        return {"fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M"), "sitemaps": sitemaps}
+    except Exception as e:
+        print(f"  サイトマップ取得失敗: {e}")
+        return {}
+
+
 def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, ga4_cat=None,
                   ga4_ts_cat=None, gsc_ts_cat=None, ga4_ts_prev=None, gsc_ts_prev=None,
                   inquiry_data=None,
                   ga4_ts_1y=None, gsc_ts_1y=None,
                   ga4_ts_2y=None, ga4_ts_3y=None,
                   ga4_monthly=None, gsc_monthly=None,
-                  draft_articles=None):
+                  draft_articles=None,
+                  sitemap_data=None):
     total_pub   = sum(c["publish"] for c in cpt_data)
     total_draft = sum(c["draft"]   for c in cpt_data)
 
@@ -1538,7 +1589,7 @@ def generate_html(cpt_data, ga4_data, gsc_data, gsc_pages, articles_data=None, g
         <div class="flex items-center gap-3 mb-4 flex-wrap">
           <button id="sm-loadBtn"
             class="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed"
-            onclick="smLoadSitemap()">サイトマップを取得</button>
+            onclick="smLoadSitemap()">🔄 更新（再取得）</button>
           <span class="text-xs text-gray-400" id="sm-lastChecked"></span>
         </div>
         <div id="sm-status" class="text-sm text-gray-600 mb-2 min-h-[20px]"></div>
@@ -1657,6 +1708,7 @@ const GA4_TS_3Y   = {json.dumps(ga4_ts_3y  or {})};
 const GA4_MONTHLY = {json.dumps(ga4_monthly or {})};
 const GSC_MONTHLY = {json.dumps(gsc_monthly or {})};
 const INQ = {json.dumps(inquiry_data or {})};
+const SITEMAP_DATA = {json.dumps(sitemap_data or {})};
 
 const CAT_COLORS = {{ all:'#6366f1', komon:'#10b981', rosai:'#ef4444', kotsu:'#f59e0b', other:'#64748b' }};
 const CAT_LABELS = {{ all:'全ジャンル', komon:'企業法務', rosai:'労災', kotsu:'交通事故', other:'その他' }};
@@ -2201,6 +2253,34 @@ function smFormatDate(str) {{
   }} catch {{ return str; }}
 }}
 
+function smInitFromEmbedded() {{
+  if (!SITEMAP_DATA || !SITEMAP_DATA.sitemaps || SITEMAP_DATA.sitemaps.length === 0) return;
+  const data = SITEMAP_DATA;
+  smAllRows = [];
+  smAllUrls = [];
+  let totalUrls = 0;
+  let latestDate = '';
+  for (const sm of data.sitemaps) {{
+    smAllRows.push({{ url: sm.url, name: sm.name, count: sm.count, lastmod: sm.lastmod }});
+    for (const u of sm.urls) {{
+      smAllUrls.push({{ url: u, sitemap: sm.name }});
+    }}
+    totalUrls += sm.count;
+    if (sm.lastmod && sm.lastmod > latestDate) latestDate = sm.lastmod;
+  }}
+  document.getElementById('sm-sumCount').textContent = smAllRows.length;
+  document.getElementById('sm-sumUrls').textContent = totalUrls.toLocaleString();
+  document.getElementById('sm-sumLatest').textContent = smFormatDate(latestDate).split(' ')[0];
+  document.getElementById('sm-summary').classList.remove('hidden');
+  document.getElementById('sm-filterBar').classList.remove('hidden');
+  document.getElementById('sm-filteredCount').textContent = smAllRows.length + ' 件';
+  document.getElementById('sm-lastChecked').textContent = '取得済み: ' + (data.fetched_at || '');
+  document.getElementById('sm-viewToggle').classList.remove('hidden');
+  smSetStatus('埋め込みデータから表示中（' + totalUrls.toLocaleString() + ' URLs）', 'ok');
+  smRenderTable(smAllRows);
+  smRenderTree();
+}}
+
 async function smLoadSitemap() {{
   const btn = document.getElementById('sm-loadBtn');
   btn.disabled = true;
@@ -2594,6 +2674,8 @@ document.addEventListener('DOMContentLoaded', () => {{
   // バッジ更新
   const badge = document.getElementById('draft-count-badge');
   if (badge) badge.textContent = DRAFTS.length;
+  // サイトマップを埋め込みデータから即時表示
+  smInitFromEmbedded();
 }});
 
 // ── 下書きビュー ──────────────────────────────────────────
@@ -2978,6 +3060,10 @@ if __name__ == "__main__":
     GSC_DAILY  = GSC_LIVE  or GSC_DAILY_FALLBACK
     GSC_PAGES  = GSC_PAGES_LIVE or GSC_PAGES_FALLBACK
 
+    # サイトマップ取得（埋め込み用）
+    print("⏳ サイトマップ取得中...")
+    sitemap_data = fetch_sitemap_for_embed()
+
     # AppSheet問い合わせデータ取得
     print("⏳ AppSheet問い合わせデータ取得中...")
     inquiry_data = fetch_inquiry_data()
@@ -3013,7 +3099,8 @@ if __name__ == "__main__":
                          ga4_ts_1y=GA4_TS_1Y, gsc_ts_1y=GSC_TS_1Y,
                          ga4_ts_2y=GA4_TS_2Y, ga4_ts_3y=GA4_TS_3Y,
                          ga4_monthly=GA4_MONTHLY, gsc_monthly=GSC_MONTHLY,
-                         draft_articles=draft_articles)
+                         draft_articles=draft_articles,
+                         sitemap_data=sitemap_data)
     out_path = Path(__file__).parent / "docs" / "index.html"
     out_path.parent.mkdir(exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
