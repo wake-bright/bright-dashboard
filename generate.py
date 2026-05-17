@@ -2365,19 +2365,43 @@ function smHighlight(text, q) {{
   return text.slice(0, i) + '<mark class="sm-hl">' + text.slice(i, i + q.length) + '</mark>' + text.slice(i + q.length);
 }}
 
-// 直接の子URL（記事リスト）を折りたたみボックスで表示
+// ARTICLES から URL→title のルックアップマップを構築
+const SM_TITLE_MAP = Object.fromEntries(
+  (typeof ARTICLES !== 'undefined' ? ARTICLES : [])
+    .filter(a => a.link && a.title)
+    .map(a => [a.link.replace(/\/$/, ''), a.title])
+);
+function smTitle(url) {{
+  return SM_TITLE_MAP[url.replace(/\/$/, '')] || null;
+}}
+
+// 記事リストをタイトル＋URL（小）で表示するボックス
 function smRenderUrlBox(urls, cpt, q) {{
   if (!urls || urls.length === 0) return '';
-  const MAX_SHOW = 50;
+  const MAX_SHOW = 100;
   const shown = urls.slice(0, MAX_SHOW);
-  const more = urls.length - shown.length;
+  const more  = urls.length - shown.length;
   const items = shown.map(u => {{
-    const slug = u.replace(/\/$/, '').split('/').pop();
-    const hl = smHighlight(slug, q);
-    return `<a href="${{u}}" target="_blank" class="block px-2 py-0.5 rounded hover:bg-white text-blue-600 hover:underline truncate" title="${{u}}">${{hl}}</a>`;
+    const title = smTitle(u);
+    const slug  = u.replace(/\/$/, '').split('/').pop();
+    const qLow  = (q || '').toLowerCase();
+    const hlText = t => {{
+      if (!qLow) return t;
+      const i = t.toLowerCase().indexOf(qLow);
+      if (i < 0) return t;
+      return t.slice(0,i) + '<mark class="sm-hl">' + t.slice(i, i+qLow.length) + '</mark>' + t.slice(i+qLow.length);
+    }};
+    if (title) {{
+      return `<a href="${{u}}" target="_blank" class="flex flex-col px-2 py-1 rounded hover:bg-white group">
+        <span class="text-gray-800 group-hover:text-blue-700 group-hover:underline leading-snug">${{hlText(title)}}</span>
+        <span class="text-gray-400 font-mono text-[10px] truncate">${{hlText(slug)}}</span>
+      </a>`;
+    }} else {{
+      return `<a href="${{u}}" target="_blank" class="block px-2 py-1 rounded hover:bg-white text-blue-600 hover:underline font-mono truncate">${{hlText(slug)}}</a>`;
+    }}
   }}).join('');
   const moreHtml = more > 0 ? `<div class="text-gray-400 px-2 py-1 text-xs">… 他 ${{more}} 件</div>` : '';
-  return `<div class="sm-url-box ml-6 mt-1 mb-2 bg-gray-50 border border-gray-200 rounded-lg p-2 max-h-48 overflow-y-auto text-xs leading-5">${{items}}${{moreHtml}}</div>`;
+  return `<div class="sm-url-box ml-6 mt-1 mb-2 bg-gray-50 border border-gray-200 rounded-lg p-2 max-h-64 overflow-y-auto text-xs leading-5">${{items}}${{moreHtml}}</div>`;
 }}
 
 function smRenderNodeHtml(name, node, depth, q, cptCtx) {{
